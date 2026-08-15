@@ -390,6 +390,8 @@ def main() -> None:  # pylint: disable=too-many-locals
             existing_posts = _load_existing_posts(output_path)
             _write_post_records(store_path, existing_posts)
         fetch_seen_shortcodes |= {post.shortcode for post in existing_posts}
+        if config.feed_position_from_end > 0:
+            fetch_seen_shortcodes = {post.shortcode for post in existing_posts}
 
     fetch_config = config
     should_fetch = True

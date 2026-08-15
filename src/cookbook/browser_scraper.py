@@ -249,7 +249,7 @@ def _scroll_profile_until_complete(page: Any, username: str) -> list[str]:
     max_scrolls = 4000
     target_media_items = 3000
     checkpoint_size = 3000
-    idle_scroll_limit = 6
+    idle_scroll_limit = 18
 
     all_media_paths: list[str] = []
     seen: set[str] = set()
