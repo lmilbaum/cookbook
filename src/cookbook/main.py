@@ -175,6 +175,31 @@ def _post_store_path(output_path: Path) -> Path:
     return output_path.with_name(f"{output_path.stem}_records")
 
 
+def _titles_path(output_path: Path) -> Path:
+    """Return the sidecar path containing user-authored post titles."""
+
+    return output_path.with_name(f"{output_path.stem}_titles.json")
+
+
+def _load_titles(titles_path: Path) -> dict[str, str]:
+    """Load user-authored titles keyed by post shortcode."""
+
+    if not titles_path.exists():
+        return {}
+
+    try:
+        payload = json.loads(titles_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid post titles file: {titles_path}") from exc
+
+    if not isinstance(payload, dict) or not all(
+        isinstance(shortcode, str) and isinstance(title, str)
+        for shortcode, title in payload.items()
+    ):
+        raise ValueError(f"Post titles file must contain a shortcode-to-title object: {titles_path}")
+    return payload
+
+
 def _load_post_store(store_path: Path) -> list[PostRecord]:
     """Load all valid post records from the immutable per-post store."""
 
@@ -373,6 +398,7 @@ def main() -> None:  # pylint: disable=too-many-locals
     output_path = resolve_from(base_dir, config.output)
     seen_path = _seen_posts_path(output_path)
     store_path = _post_store_path(output_path)
+    titles_path = _titles_path(output_path)
 
     load_dotenv = load_dotenv_loader()
     load_dotenv(env_path)
@@ -421,6 +447,7 @@ def main() -> None:  # pylint: disable=too-many-locals
         output_path,
         reuse_cached_assets=not config.ignore_cached_posts,
     )
+    titles = _load_titles(titles_path)
     if config.ignore_cached_posts:
         _prune_cached_assets(report_posts, output_path)
 
@@ -431,7 +458,12 @@ def main() -> None:  # pylint: disable=too-many-locals
     favicon_path = write_favicon(output_path)
     html_path = output_path.with_suffix(".html")
     html_path.write_text(
-        render_html(report_posts, config.username, favicon_href=favicon_path.name),
+        render_html(
+            report_posts,
+            config.username,
+            favicon_href=favicon_path.name,
+            titles=titles,
+        ),
         encoding="utf-8",
     )
     if not config.ignore_cached_posts:
