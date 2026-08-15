@@ -16,7 +16,10 @@ from .browser_scraper import fetch_posts_browser
 from .config import AppConfig, load_config, parse_args, resolve_from
 from .dependencies import load_dotenv_loader
 from .models import PostRecord
-from .report_html import render_html, write_favicon
+from .report_html import (
+    render_html,
+    write_favicon,
+)
 
 
 def _find_cached_asset(assets_dir: Path, shortcode: str) -> Path | None:
