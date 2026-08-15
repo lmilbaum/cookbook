@@ -60,10 +60,10 @@ def render_html(
               '<a href="'
               f'{html.escape(recipe_url, quote=True)}'
               '" target="_blank" rel="noreferrer">'
-              f'Open recipe {index}'
+              'Open recipe'
               '</a>'
               '</p>'
-              for index, recipe_url in enumerate(_recipe_urls_for_post(post), start=1)
+              for recipe_url in _recipe_urls_for_post(post)
             )
 
         cards.append(
