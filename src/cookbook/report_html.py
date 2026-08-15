@@ -9,10 +9,10 @@ from .models import PostRecord
 
 
 def _recipe_urls_for_post(post: PostRecord) -> list[str]:
-  """Return unique recipe URLs, supporting both old and new record formats."""
+    """Return unique recipe URLs, supporting both old and new record formats."""
 
-  urls = ([post.recipe_url] if post.recipe_url.strip() else []) + post.recipe_urls
-  return list(dict.fromkeys(url.strip() for url in urls if url.strip()))
+    urls = ([post.recipe_url] if post.recipe_url.strip() else []) + post.recipe_urls
+    return list(dict.fromkeys(url.strip() for url in urls if url.strip()))
 
 
 def _title_for_post(post: PostRecord, titles: dict[str, str]) -> str:
@@ -30,10 +30,10 @@ def _title_for_post(post: PostRecord, titles: dict[str, str]) -> str:
 
 
 def render_html(
-  posts: list[PostRecord],
-  username: str,
-  favicon_href: str,
-  titles: dict[str, str] | None = None,
+    posts: list[PostRecord],
+    username: str,
+    favicon_href: str,
+    titles: dict[str, str] | None = None,
 ) -> str:
     """Render fetched posts into a standalone HTML document."""
 
@@ -55,16 +55,16 @@ def render_html(
                 f"{image_tag}</a>"
             )
 
-            recipe_markup = "\n".join(
-              '<p class="link-row">'
-              '<a href="'
-              f'{html.escape(recipe_url, quote=True)}'
-              '" target="_blank" rel="noreferrer">'
-              'Open recipe'
-              '</a>'
-              '</p>'
-              for recipe_url in _recipe_urls_for_post(post)
-            )
+        recipe_markup = "\n".join(
+            '<p class="link-row">'
+            '<a href="'
+            f'{html.escape(recipe_url, quote=True)}'
+            '" target="_blank" rel="noreferrer">'
+            'Open recipe'
+            '</a>'
+            '</p>'
+            for recipe_url in _recipe_urls_for_post(post)
+        )
 
         cards.append(
             f"""
