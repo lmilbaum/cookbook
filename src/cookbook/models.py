@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 
 
 @dataclass
@@ -20,3 +21,4 @@ class PostRecord:  # pylint: disable=too-many-instance-attributes
     is_video: bool
     title: str = ""
     recipe_url: str = ""
+    recipe_urls: list[str] = field(default_factory=list)

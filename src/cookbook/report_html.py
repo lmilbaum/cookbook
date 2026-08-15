@@ -8,6 +8,13 @@ from pathlib import Path
 from .models import PostRecord
 
 
+def _recipe_urls_for_post(post: PostRecord) -> list[str]:
+  """Return unique recipe URLs, supporting both old and new record formats."""
+
+  urls = ([post.recipe_url] if post.recipe_url.strip() else []) + post.recipe_urls
+  return list(dict.fromkeys(url.strip() for url in urls if url.strip()))
+
+
 def _title_for_post(post: PostRecord, titles: dict[str, str]) -> str:
     """Prefer a user-provided title, then use the first caption line."""
 
@@ -48,17 +55,16 @@ def render_html(
                 f"{image_tag}</a>"
             )
 
-            recipe_markup = ""
-            if post.recipe_url.strip():
-              recipe_markup = (
-                '<p class="link-row">'
-                '<a href="'
-                f'{html.escape(post.recipe_url, quote=True)}'
-                '" target="_blank" rel="noreferrer">'
-                'Open recipe'
-                '</a>'
-                '</p>'
-              )
+            recipe_markup = "\n".join(
+              '<p class="link-row">'
+              '<a href="'
+              f'{html.escape(recipe_url, quote=True)}'
+              '" target="_blank" rel="noreferrer">'
+              f'Open recipe {index}'
+              '</a>'
+              '</p>'
+              for index, recipe_url in enumerate(_recipe_urls_for_post(post), start=1)
+            )
 
         cards.append(
             f"""
