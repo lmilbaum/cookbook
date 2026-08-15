@@ -8,12 +8,20 @@ from pathlib import Path
 from .models import PostRecord
 
 
+def _title_for_post(post: PostRecord) -> str:
+    """Use the first caption line as a title when the post provides one."""
+
+    caption_lines = [line.strip() for line in post.caption.splitlines() if line.strip()]
+    return caption_lines[0] if caption_lines else ""
+
+
 def render_html(posts: list[PostRecord], username: str, favicon_href: str) -> str:
     """Render fetched posts into a standalone HTML document."""
 
     cards: list[str] = []
     for post in posts:
-        title_markup = f'<h2 class="card-title">{html.escape(post.shortcode)}</h2>'
+        title = _title_for_post(post)
+        title_markup = f'<h2 class="card-title">{html.escape(title)}</h2>' if title else ""
 
         img_markup = ""
         if post.image_url:
