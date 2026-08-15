@@ -113,10 +113,6 @@ def render_html(
       h1 {{
         margin: 0 0 8px;
       }}
-      .subtitle {{
-        margin: 0 0 24px;
-        color: #b5bcc9;
-      }}
       .link-row {{
         margin: 0 0 10px;
       }}
@@ -166,8 +162,7 @@ def render_html(
   </head>
   <body>
     <main>
-      <h1>@{safe_username}</h1>
-      <p class=\"subtitle\">Fetched Instagram posts</p>
+      <h1>Liora's cookbook</h1>
       <section class=\"grid\">
 {cards_markup}
       </section>
