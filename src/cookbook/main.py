@@ -18,6 +18,7 @@ from .dependencies import load_dotenv_loader
 from .models import PostRecord
 from .report_html import (
     render_html,
+    render_shopping_list_html,
     write_favicon,
 )
 
@@ -49,6 +50,7 @@ def _prune_cached_assets(posts: list[PostRecord], output_path: Path) -> None:
             asset_path.unlink()
 
 
+# pylint: disable=too-many-locals
 def _cache_images_for_report(
     posts: list[PostRecord],
     output_path: Path,
@@ -199,7 +201,9 @@ def _load_titles(titles_path: Path) -> dict[str, str]:
         isinstance(shortcode, str) and isinstance(title, str)
         for shortcode, title in payload.items()
     ):
-        raise ValueError(f"Post titles file must contain a shortcode-to-title object: {titles_path}")
+        raise ValueError(
+            f"Post titles file must contain a shortcode-to-title object: {titles_path}"
+        )
     return payload
 
 
@@ -292,12 +296,12 @@ def _load_seen_shortcodes(seen_path: Path, output_path: Path) -> set[str]:
         return set(payload)
 
     if not isinstance(payload, list):
-        raise ValueError(f"Existing output must contain a list of posts: {output_path}")
+        raise TypeError(f"Existing output must contain a list of posts: {output_path}")
 
     shortcodes: set[str] = set()
     for post in payload:
         if not isinstance(post, dict):
-            raise ValueError(f"Existing output contains an invalid post: {output_path}")
+            raise TypeError(f"Existing output contains an invalid post: {output_path}")
         shortcode = post.get("shortcode")
         if not isinstance(shortcode, str) or not shortcode:
             raise ValueError(f"Existing output contains a post without a shortcode: {output_path}")
@@ -331,16 +335,18 @@ def _load_existing_posts(output_path: Path) -> list[PostRecord]:
         raise ValueError(f"Invalid JSON in existing output: {output_path}") from exc
 
     if not isinstance(payload, list):
-        raise ValueError(f"Existing output must contain a list of posts: {output_path}")
+        raise TypeError(f"Existing output must contain a list of posts: {output_path}")
 
     posts: list[PostRecord] = []
     for post in payload:
         if not isinstance(post, dict):
-            raise ValueError(f"Existing output contains an invalid post: {output_path}")
+            raise TypeError(f"Existing output contains an invalid post: {output_path}")
         try:
             posts.append(PostRecord(**post))
         except TypeError as exc:
-            raise ValueError(f"Existing output contains malformed post fields: {output_path}") from exc
+            raise ValueError(
+                f"Existing output contains malformed post fields: {output_path}"
+            ) from exc
     return posts
 
 
@@ -419,7 +425,7 @@ def _fetch_posts_with_fallback(
         return _fetch_posts_browser_only(config, login_user, password, seen_shortcodes)
 
 
-def main() -> None:  # pylint: disable=too-many-locals
+def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     """Program entrypoint."""
 
     args = parse_args()
@@ -503,6 +509,11 @@ def main() -> None:  # pylint: disable=too-many-locals
             favicon_href=favicon_path.name,
             titles=titles,
         ),
+        encoding="utf-8",
+    )
+    shopping_list_path = html_path.with_name("shopping_list.html")
+    shopping_list_path.write_text(
+        render_shopping_list_html(favicon_href=favicon_path.name),
         encoding="utf-8",
     )
     if not config.ignore_cached_posts:

@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 *_posts.json
 *_posts.html
+shopping_list.html
 *_posts.seen.json*
 *_posts_assets/
 *_posts_records/

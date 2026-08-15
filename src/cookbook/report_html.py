@@ -163,10 +163,113 @@ def render_html(
   <body>
     <main>
       <h1>Liora's cookbook</h1>
+      <p class="link-row"><a href="shopping_list.html">Open shopping list</a></p>
       <section class=\"grid\">
 {cards_markup}
       </section>
     </main>
+  </body>
+</html>
+"""
+
+
+def render_shopping_list_html(favicon_href: str) -> str:
+    """Render the standalone shopping-list page using the report's shared storage."""
+
+    safe_favicon_href = html.escape(favicon_href, quote=True)
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shopping list</title>
+    <link rel="icon" type="image/svg+xml" href="{safe_favicon_href}" />
+    <style>
+      body {{ margin: 0; background: #0f1115; color: #eceef3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+      main {{ max-width: 680px; margin: 0 auto; padding: 32px 16px 48px; }}
+      .back-link {{ color: #8db7ff; }}
+      .shopping-list {{ background: #f4efe6; color: #24211d; border: 1px solid #d8cbb8; border-radius: 12px; padding: 20px; margin-top: 24px; }}
+      h1 {{ margin: 0; }}
+      h2 {{ margin: 0 0 14px; }}
+      .shopping-form {{ display: flex; gap: 8px; margin-bottom: 14px; }}
+      input[type="text"] {{ min-width: 0; flex: 1; border: 1px solid #b9aa96; border-radius: 6px; padding: 10px 12px; font: inherit; }}
+      .shopping-form button, .clear-purchased {{ border: 0; border-radius: 6px; padding: 10px 14px; background: #24211d; color: #fffaf2; font: inherit; cursor: pointer; }}
+      .shopping-items {{ display: grid; gap: 6px; margin-bottom: 14px; }}
+      .shopping-item {{ display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #dfd4c5; }}
+      .shopping-item label {{ flex: 1; overflow-wrap: anywhere; }}
+      .shopping-item.done label {{ color: #83796d; text-decoration: line-through; }}
+      .remove-item {{ border: 0; background: transparent; color: #9a3d35; cursor: pointer; }}
+      .empty-shopping-list {{ color: #756b60; }}
+      .list-footer {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; }}
+      @media (max-width: 480px) {{ .shopping-form {{ flex-wrap: wrap; }} .shopping-form button {{ flex: 1; }} }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back-link" href="lizapanelim_posts.html">Back to cookbook</a>
+      <section class="shopping-list" aria-labelledby="shopping-list-title">
+        <h1 id="shopping-list-title">Shopping list</h1>
+        <p>Add items, check them off, and keep the list in this browser.</p>
+        <form class="shopping-form" id="shopping-form">
+          <input id="shopping-item-input" type="text" maxlength="120" placeholder="Add an item..." aria-label="Shopping list item" required />
+          <button type="submit">Add item</button>
+        </form>
+        <div class="shopping-items" id="shopping-items"></div>
+        <p class="empty-shopping-list" id="empty-shopping-list">Your list is empty.</p>
+        <div class="list-footer">
+          <span id="shopping-count">0 items</span>
+          <button class="clear-purchased" id="clear-purchased" type="button">Clear purchased</button>
+        </div>
+      </section>
+    </main>
+    <script>
+      (() => {{
+        const storageKey = "cookbook-shopping-list";
+        const form = document.getElementById("shopping-form");
+        const input = document.getElementById("shopping-item-input");
+        const itemsElement = document.getElementById("shopping-items");
+        const emptyElement = document.getElementById("empty-shopping-list");
+        const countElement = document.getElementById("shopping-count");
+        const clearButton = document.getElementById("clear-purchased");
+        let items = JSON.parse(localStorage.getItem(storageKey) || "[]");
+        const save = () => localStorage.setItem(storageKey, JSON.stringify(items));
+        const render = () => {{
+          itemsElement.replaceChildren();
+          items.forEach((item) => {{
+            const row = document.createElement("div");
+            row.className = `shopping-item${{item.done ? " done" : ""}}`;
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = item.done;
+            checkbox.setAttribute("aria-label", `Mark ${{item.name}} as purchased`);
+            checkbox.addEventListener("change", () => {{ item.done = checkbox.checked; save(); render(); }});
+            const label = document.createElement("label");
+            label.textContent = item.name;
+            const removeButton = document.createElement("button");
+            removeButton.className = "remove-item";
+            removeButton.type = "button";
+            removeButton.textContent = "Remove";
+            removeButton.addEventListener("click", () => {{ items = items.filter((candidate) => candidate.id !== item.id); save(); render(); }});
+            row.append(checkbox, label, removeButton);
+            itemsElement.append(row);
+          }});
+          emptyElement.hidden = items.length > 0;
+          countElement.textContent = `${{items.length}} item${{items.length === 1 ? "" : "s"}}`;
+        }};
+        form.addEventListener("submit", (event) => {{
+          event.preventDefault();
+          const name = input.value.trim();
+          if (!name) return;
+          items.push({{ id: `${{Date.now()}}-${{Math.random()}}`, name, done: false }});
+          save();
+          input.value = "";
+          render();
+          input.focus();
+        }});
+        clearButton.addEventListener("click", () => {{ items = items.filter((item) => !item.done); save(); render(); }});
+        render();
+      }})();
+    </script>
   </body>
 </html>
 """
