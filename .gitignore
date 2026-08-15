@@ -1,0 +1,14 @@
+# cspell:words venv
+.env
+.instagram.session
+.instagram.session.*
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+*_posts.json
+*_posts.html
+*_posts.seen.json*
+*_posts_assets/
+*_posts_records/

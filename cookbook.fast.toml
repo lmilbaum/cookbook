@@ -1,0 +1,12 @@
+# cspell:words lizapanelim
+username = "lizapanelim"
+limit = 1
+output = "lizapanelim_posts.json"
+reverse = false
+login_user = "lmilbaum"
+session_file = ".instagram.session"
+env_file = ".env"
+request_delay_seconds = 3.0
+max_fetch_attempts = 4
+retry_wait_seconds = 300
+use_browser = true
