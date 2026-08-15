@@ -19,3 +19,4 @@ class PostRecord:  # pylint: disable=too-many-instance-attributes
     typename: str
     is_video: bool
     title: str = ""
+    recipe_url: str = ""

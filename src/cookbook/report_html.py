@@ -48,6 +48,18 @@ def render_html(
                 f"{image_tag}</a>"
             )
 
+            recipe_markup = ""
+            if post.recipe_url.strip():
+              recipe_markup = (
+                '<p class="link-row">'
+                '<a href="'
+                f'{html.escape(post.recipe_url, quote=True)}'
+                '" target="_blank" rel="noreferrer">'
+                'Open recipe'
+                '</a>'
+                '</p>'
+              )
+
         cards.append(
             f"""
       <article class=\"card\">
@@ -63,6 +75,7 @@ def render_html(
             Open on Instagram
           </a>
         </p>
+        {recipe_markup}
         {img_markup}
         <pre>{html.escape(post.caption)}</pre>
       </article>
