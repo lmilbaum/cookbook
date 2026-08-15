@@ -83,7 +83,6 @@ def render_html(
         </p>
         {recipe_markup}
         {img_markup}
-        <pre>{html.escape(post.caption)}</pre>
       </article>
 """
         )
