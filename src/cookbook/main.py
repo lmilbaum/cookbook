@@ -233,6 +233,40 @@ def _write_post_records(store_path: Path, posts: list[PostRecord]) -> None:
         temporary_path.replace(record_path)
 
 
+def _migrate_titles_to_post_records(store_path: Path, titles: dict[str, str]) -> None:
+    """Copy legacy sidecar titles into the corresponding post records."""
+
+    for shortcode, title in titles.items():
+        title = title.strip()
+        record_path = store_path / f"{shortcode}.json"
+        if not title or not record_path.exists():
+            continue
+
+        try:
+            payload = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Invalid post record: {record_path}") from exc
+        if payload.get("title", "").strip() == title:
+            continue
+
+        payload["title"] = title
+        temporary_path = record_path.with_name(f".{record_path.name}.tmp")
+        temporary_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(record_path)
+
+
+def _apply_titles(posts: list[PostRecord], titles: dict[str, str]) -> list[PostRecord]:
+    """Apply legacy sidecar titles to newly fetched records."""
+
+    return [
+        replace(post, title=titles.get(post.shortcode, post.title).strip())
+        for post in posts
+    ]
+
+
 def _load_seen_shortcodes(seen_path: Path, output_path: Path) -> set[str]:
     """Load processed shortcodes, bootstrapping from existing output if needed."""
 
@@ -408,9 +442,11 @@ def main() -> None:  # pylint: disable=too-many-locals
     config.session_file = str(session_path)
 
     seen_shortcodes = _load_seen_shortcodes(seen_path, output_path)
+    titles = _load_titles(titles_path)
     fetch_seen_shortcodes = set() if config.ignore_cached_posts else seen_shortcodes
     existing_posts: list[PostRecord] = []
     if not config.ignore_cached_posts:
+        _migrate_titles_to_post_records(store_path, titles)
         existing_posts = _load_post_store(store_path)
         if not existing_posts and output_path.exists():
             existing_posts = _load_existing_posts(output_path)
@@ -432,6 +468,7 @@ def main() -> None:  # pylint: disable=too-many-locals
         if should_fetch
         else []
     )
+    new_posts = _apply_titles(new_posts, titles)
     if not config.ignore_cached_posts:
         _write_post_records(store_path, new_posts)
     merged_posts = new_posts if config.ignore_cached_posts else _merge_posts(
@@ -447,7 +484,6 @@ def main() -> None:  # pylint: disable=too-many-locals
         output_path,
         reuse_cached_assets=not config.ignore_cached_posts,
     )
-    titles = _load_titles(titles_path)
     if config.ignore_cached_posts:
         _prune_cached_assets(report_posts, output_path)
 

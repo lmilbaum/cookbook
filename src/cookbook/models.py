@@ -18,3 +18,4 @@ class PostRecord:  # pylint: disable=too-many-instance-attributes
     comments: int
     typename: str
     is_video: bool
+    title: str = ""

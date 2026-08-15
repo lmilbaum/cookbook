@@ -11,9 +11,12 @@ from .models import PostRecord
 def _title_for_post(post: PostRecord, titles: dict[str, str]) -> str:
     """Prefer a user-provided title, then use the first caption line."""
 
-    user_title = titles.get(post.shortcode, "").strip()
-    if user_title:
-        return user_title
+    if post.title.strip():
+        return post.title.strip()
+
+    sidecar_title = titles.get(post.shortcode, "").strip()
+    if sidecar_title:
+        return sidecar_title
 
     caption_lines = [line.strip() for line in post.caption.splitlines() if line.strip()]
     return caption_lines[0] if caption_lines else ""
