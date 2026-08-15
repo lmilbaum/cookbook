@@ -424,6 +424,7 @@ def fetch_posts_browser(
     reverse: bool = False,
     session_file: str = ".instagram.session",
     seen_shortcodes: set[str] | None = None,
+    feed_position_from_end: int = 0,
 ) -> list[PostRecord]:
     """Fetch Instagram posts using a headless browser with required authentication."""
 
@@ -478,6 +479,10 @@ def fetch_posts_browser(
 
             if reverse:
                 media_paths.reverse()
+
+            if feed_position_from_end > 0:
+                position = len(media_paths) - feed_position_from_end
+                media_paths = [media_paths[position]] if position >= 0 else []
 
             media_paths = [
                 media_path

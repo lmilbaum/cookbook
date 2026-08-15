@@ -322,6 +322,7 @@ def _fetch_posts_browser_only(
         reverse=config.reverse,
         session_file=config.session_file,
         seen_shortcodes=seen_shortcodes,
+        feed_position_from_end=config.feed_position_from_end,
     )
 
 

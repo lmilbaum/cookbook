@@ -11,3 +11,4 @@ max_fetch_attempts = 4
 retry_wait_seconds = 300
 use_browser = true
 ignore_cached_posts = false
+feed_position_from_end = 4

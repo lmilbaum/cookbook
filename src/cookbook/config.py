@@ -25,6 +25,7 @@ class AppConfig:  # pylint: disable=too-many-instance-attributes
     use_browser: bool
     api_401_cooldown_hours: int
     ignore_cached_posts: bool
+    feed_position_from_end: int
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,6 +101,12 @@ def load_config(config_path: Path) -> AppConfig:  # pylint: disable=too-many-bra
     if not isinstance(ignore_cached_posts, bool):
         raise TypeError("Config key 'ignore_cached_posts' must be true/false.")
 
+    feed_position_from_end = raw.get("feed_position_from_end", 0)
+    if not isinstance(feed_position_from_end, int):
+        raise TypeError("Config key 'feed_position_from_end' must be an integer.")
+    if feed_position_from_end < 0:
+        raise ValueError("Config key 'feed_position_from_end' must be >= 0.")
+
     return AppConfig(
         username=username.strip(),
         limit=limit,
@@ -114,6 +121,7 @@ def load_config(config_path: Path) -> AppConfig:  # pylint: disable=too-many-bra
         use_browser=use_browser,
         api_401_cooldown_hours=api_401_cooldown_hours,
         ignore_cached_posts=ignore_cached_posts,
+        feed_position_from_end=feed_position_from_end,
     )
 
 
