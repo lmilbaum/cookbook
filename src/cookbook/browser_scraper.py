@@ -324,6 +324,24 @@ def _shortcode_from_media_path(media_path: str) -> str:
     return shortcode_match.group(1) if shortcode_match else media_path.strip("/")
 
 
+def _extract_caption(page: Any) -> str:
+    """Extract a caption from the article, with metadata fallback."""
+
+    article = page.locator("article").first
+    if article.count() > 0:
+        caption = article.inner_text(timeout=5000).strip()
+        if caption:
+            return caption
+
+    for selector in ('meta[property="og:description"]', 'meta[name="description"]'):
+        metadata = page.locator(selector).first
+        if metadata.count() > 0:
+            caption = (metadata.get_attribute("content") or "").strip()
+            if caption:
+                return caption
+    return ""
+
+
 def _fetch_post_details(page: Any, media_path: str, timeout_seconds: int) -> PostRecord:
     """Fetch details for a single post or reel by navigating to its page."""
 
@@ -345,10 +363,7 @@ def _fetch_post_details(page: Any, media_path: str, timeout_seconds: int) -> Pos
     like_match = re.search(r"(\d+)\s+likes?", page_text, flags=re.IGNORECASE)
     comment_match = re.search(r"(\d+)\s+comments?", page_text, flags=re.IGNORECASE)
 
-    caption = ""
-    article = page.locator("article").first
-    if article.count() > 0:
-        caption = article.inner_text(timeout=5000).strip()
+    caption = _extract_caption(page)
 
     image_url = _extract_highest_resolution_image(page)
     if not image_url:

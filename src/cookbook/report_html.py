@@ -7,47 +7,13 @@ from pathlib import Path
 
 from .models import PostRecord
 
-_ANTIPASTI_URL = (
-    "https://www.thekitchencoach.co.il/"
-    "%d7%9e%d7%aa%d7%9b%d7%95%d7%9f-%d7%90%d7%a0%d7%98%d7%99%d7%a4%d7%a1"
-    "%d7%98%d7%99-%d7%99%d7%a8%d7%a7%d7%95%d7%aa-%d7%91%d7%aa%d7%a0%d7%95"
-    "%d7%a8/"
-)
-_PIE_URL = "https://www.carine.co.il/foody_recipe/%d7%a4%d7%90%d7%99-%d7%aa%d7%a4%d7%95%d7%97%d7%99%d7%9d-%d7%90%d7%9e%d7%a8%d7%99%d7%a7%d7%90%d7%99/"
-_AVOCADO_URL = "https://lizapanelim.com/%D7%A1%D7%9C%D7%98-%D7%90%D7%91%D7%95%D7%A7%D7%93%D7%95-%D7%90%D7%91%D7%99%D7%91%D7%99-%D7%9E%D7%A8%D7%A2%D7%A0%D7%9F/"
-
-
-def _related_recipe_for_card(index: int) -> tuple[str, str]:
-    """Return the related recipe URL and label for a card index."""
-
-    if index == 3:
-        return _AVOCADO_URL, "סלט אבוקדו אביבי מרענן - לייזה פאנלים"
-    if index == 2:
-        return _PIE_URL, "פאי תפוחים אמריקאי - Carine"
-    return _ANTIPASTI_URL, "איך להכין אנטיפסטי - המדריך של עז תלם"
-
-
-def _card_name_for_index(index: int) -> str:
-    """Return the display title for each card by position."""
-
-    if index == 1:
-        return "אנטיפסטי"
-    if index == 2:
-        return "פאי תפוחים אמריקאי"
-    return ""
-
 
 def render_html(posts: list[PostRecord], username: str, favicon_href: str) -> str:
     """Render fetched posts into a standalone HTML document."""
 
     cards: list[str] = []
-    for index, post in enumerate(posts, start=1):
-        recipe_url, recipe_label = _related_recipe_for_card(index)
-        card_name = _card_name_for_index(index)
-
-        title_markup = ""
-        if card_name:
-            title_markup = f'<h2 class="card-title">{html.escape(card_name)}</h2>'
+    for post in posts:
+        title_markup = f'<h2 class="card-title">{html.escape(post.shortcode)}</h2>'
 
         img_markup = ""
         if post.image_url:
@@ -57,17 +23,9 @@ def render_html(posts: list[PostRecord], username: str, favicon_href: str) -> st
                 'loading="lazy" />'
             )
             img_markup = (
-                f'<a href="{recipe_url}" target="_blank" rel="noreferrer">'
+                f'<a href="{html.escape(post.url, quote=True)}" target="_blank" rel="noreferrer">'
                 f"{image_tag}</a>"
             )
-
-        related_recipe_markup = (
-            '<p class="link-row" dir="rtl">'
-            'מתכון קשור: '
-            f'<a href="{recipe_url}" target="_blank" rel="noreferrer">'
-            f'<bdi>{html.escape(recipe_label)}</bdi></a>'
-            '</p>'
-        )
 
         cards.append(
             f"""
@@ -84,7 +42,6 @@ def render_html(posts: list[PostRecord], username: str, favicon_href: str) -> st
             Open on Instagram
           </a>
         </p>
-        {related_recipe_markup}
         {img_markup}
         <pre>{html.escape(post.caption)}</pre>
       </article>
