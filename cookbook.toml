@@ -1,8 +1,8 @@
 # cspell:words lizapanelim
 username = "lizapanelim"
-limit = 4
+limit = 5
 output = "lizapanelim_posts.json"
-reverse = false
+reverse = true
 login_user = "lmilbaum"
 session_file = ".instagram.session"
 env_file = ".env"
@@ -11,4 +11,4 @@ max_fetch_attempts = 4
 retry_wait_seconds = 300
 use_browser = true
 ignore_cached_posts = false
-feed_position_from_end = 4
+feed_position_from_end = 0
