@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 from pathlib import Path
 
 from .models import PostRecord
@@ -41,7 +42,7 @@ def render_html(
     cards: list[str] = []
     for post in posts:
         title = _title_for_post(post, titles)
-        title_markup = f'<h2 class="card-title">{html.escape(title)}</h2>' if title else ""
+        title_markup = f'<h2 class="card-title">{html.escape(title)}</h2>'
 
         img_markup = ""
         if post.image_url:
@@ -55,6 +56,7 @@ def render_html(
                 f"{image_tag}</a>"
             )
 
+        recipe_urls = _recipe_urls_for_post(post)
         recipe_markup = "\n".join(
             '<p class="link-row">'
             '<a href="'
@@ -63,12 +65,27 @@ def render_html(
             'Open recipe'
             '</a>'
             '</p>'
-            for recipe_url in _recipe_urls_for_post(post)
+            for recipe_url in recipe_urls
+        )
+
+        editor_data = html.escape(
+            json.dumps(
+                {
+                    "id": post.shortcode,
+                    "title": title,
+                    "sourceUrl": post.url,
+                    "recipeUrl": recipe_urls[0] if recipe_urls else "",
+                    "imageUrl": post.image_url,
+                    "notes": "",
+                },
+                ensure_ascii=False,
+            ),
+            quote=True,
         )
 
         cards.append(
             f"""
-      <article class=\"card\">
+      <article class=\"card\" data-recipe-id=\"{html.escape(post.shortcode, quote=True)}\" data-recipe=\"{editor_data}\">
         {title_markup}
         <div class=\"meta\">
           <span>{html.escape(post.timestamp_utc)}</span>
@@ -76,13 +93,15 @@ def render_html(
           <span>Comments: {post.comments}</span>
           <span>{html.escape(post.typename)}</span>
         </div>
-        <p class=\"link-row\">
+        <p class=\"link-row source-link\">
           <a href=\"{html.escape(post.url, quote=True)}\" target=\"_blank\" rel=\"noreferrer\">
             Open on Instagram
           </a>
         </p>
-        {recipe_markup}
-        {img_markup}
+        <div class=\"recipe-links\">{recipe_markup}</div>
+        <p class=\"recipe-notes\" hidden></p>
+        <div class=\"card-image\">{img_markup}</div>
+        <button class=\"edit-recipe\" type=\"button\">Edit recipe</button>
       </article>
 """
         )
@@ -113,6 +132,8 @@ def render_html(
       h1 {{
         margin: 0 0 8px;
       }}
+      .page-header {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }}
+      .page-header h1 {{ margin: 0; }}
       .link-row {{
         margin: 0 0 10px;
       }}
@@ -131,6 +152,20 @@ def render_html(
         font-size: 1.2rem;
         line-height: 1.25;
       }}
+      button {{ border: 0; border-radius: 7px; padding: 9px 13px; background: #8db7ff; color: #101218; font: inherit; font-weight: 600; cursor: pointer; }}
+      .edit-recipe {{ margin-top: 4px; background: #2a2f3a; color: #eceef3; }}
+      dialog {{ width: min(520px, calc(100% - 32px)); border: 1px solid #3a414f; border-radius: 12px; padding: 0; background: #171a21; color: #eceef3; }}
+      dialog::backdrop {{ background: rgba(0, 0, 0, 0.72); }}
+      .recipe-form {{ display: grid; gap: 14px; padding: 22px; }}
+      .recipe-form h2 {{ margin: 0; }}
+      .recipe-form label {{ display: grid; gap: 6px; color: #cbd1dc; }}
+      .recipe-form input {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
+      .recipe-form textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
+      .recipe-notes {{ white-space: pre-wrap; overflow-wrap: anywhere; color: #cbd1dc; line-height: 1.45; }}
+      .form-actions {{ display: flex; justify-content: flex-end; gap: 8px; }}
+      .secondary-button {{ background: #2a2f3a; color: #eceef3; }}
+      .danger-button {{ margin-right: auto; background: #7d2c32; color: #fff; }}
+      .save-status {{ min-height: 1.25em; margin: 0; color: #92d3a2; font-size: .9rem; }}
       img {{
         display: block;
         width: 100%;
@@ -162,12 +197,118 @@ def render_html(
   </head>
   <body>
     <main>
-      <h1>Liora's cookbook</h1>
+      <div class="page-header">
+        <h1>Liora's cookbook</h1>
+        <button id="add-recipe" type="button">Add recipe</button>
+      </div>
       <p class="link-row"><a href="shopping_list.html">Open shopping list</a></p>
-      <section class=\"grid\">
+      <section class=\"grid\" id=\"recipe-grid\">
 {cards_markup}
       </section>
     </main>
+    <dialog id="recipe-dialog">
+      <form class="recipe-form" id="recipe-form">
+        <h2 id="recipe-form-title">Add recipe</h2>
+        <input id="recipe-id" type="hidden" />
+        <label>Recipe name <input id="recipe-title" type="text" maxlength="160" required /></label>
+        <label>Recipe link <input id="recipe-url" type="url" placeholder="https://..." /></label>
+        <label>Source link <input id="source-url" type="url" placeholder="https://..." /></label>
+        <label>Image link <input id="image-url" type="text" placeholder="https://..." /></label>
+        <label>הערות <textarea id="recipe-notes" dir="rtl" maxlength="2000" placeholder="הוסיפו טיפים להכנה, תחליפים או הערות נוספות..."></textarea></label>
+        <p class="save-status" id="save-status" aria-live="polite"></p>
+        <div class="form-actions">
+          <button class="danger-button" id="delete-recipe" type="button">Delete</button>
+          <button class="secondary-button" id="cancel-recipe" type="button">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+    <script>
+      (() => {{
+        const storageKey = "cookbook-recipe-changes-v1";
+        const grid = document.getElementById("recipe-grid");
+        const dialog = document.getElementById("recipe-dialog");
+        const form = document.getElementById("recipe-form");
+        const formTitle = document.getElementById("recipe-form-title");
+        const idInput = document.getElementById("recipe-id");
+        const titleInput = document.getElementById("recipe-title");
+        const recipeUrlInput = document.getElementById("recipe-url");
+        const sourceUrlInput = document.getElementById("source-url");
+        const imageUrlInput = document.getElementById("image-url");
+        const notesInput = document.getElementById("recipe-notes");
+        const deleteButton = document.getElementById("delete-recipe");
+        const saveStatus = document.getElementById("save-status");
+        const baseIds = new Set([...grid.querySelectorAll("[data-recipe-id]")].map((card) => card.dataset.recipeId));
+        let state;
+        try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
+        catch {{ state = {{ overrides: {{}}, custom: [] }}; }}
+        if (!state || typeof state !== "object") state = {{ overrides: {{}}, custom: [] }};
+        state.overrides ||= {{}};
+        state.custom ||= [];
+
+        const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
+        const safeLink = (value) => {{
+          if (!value) return "";
+          try {{ const url = new URL(value, window.location.href); return ["http:", "https:", "file:"].includes(url.protocol) ? url.href : ""; }}
+          catch {{ return ""; }}
+        }};
+        const linkRow = (url, label, className = "") => {{
+          if (!url) return null;
+          const row = document.createElement("p"); row.className = `link-row ${{className}}`;
+          const link = document.createElement("a"); link.href = url; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = label;
+          row.append(link); return row;
+        }};
+        const updateCard = (card, recipe) => {{
+          card.querySelector(".card-title").textContent = recipe.title;
+          const source = card.querySelector(".source-link");
+          const newSource = linkRow(safeLink(recipe.sourceUrl), "Open source", "source-link") || document.createElement("p");
+          newSource.className ||= "link-row source-link"; newSource.hidden = !recipe.sourceUrl;
+          source.replaceWith(newSource);
+          const links = card.querySelector(".recipe-links"); links.replaceChildren();
+          const recipeLink = linkRow(safeLink(recipe.recipeUrl), "Open recipe"); if (recipeLink) links.append(recipeLink);
+          const notes = card.querySelector(".recipe-notes"); notes.textContent = recipe.notes || ""; notes.hidden = !notes.textContent;
+          const imageBox = card.querySelector(".card-image"); imageBox.replaceChildren();
+          const imageUrl = safeLink(recipe.imageUrl);
+          if (imageUrl) {{ const image = document.createElement("img"); image.src = imageUrl; image.alt = recipe.title; image.loading = "lazy"; imageBox.append(image); }}
+          card.dataset.recipe = JSON.stringify(recipe);
+        }};
+        const createCard = (recipe) => {{
+          const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id;
+          card.innerHTML = '<h2 class="card-title"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><p class="recipe-notes" hidden></p><div class="card-image"></div><button class="edit-recipe" type="button">Edit recipe</button>';
+          updateCard(card, recipe); return card;
+        }};
+        const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
+        const openEditor = (recipe, isCustom) => {{
+          form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; recipeUrlInput.value = recipe.recipeUrl || "";
+          sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || ""; notesInput.value = recipe.notes || "";
+          formTitle.textContent = recipe.id ? "Edit recipe" : "Add recipe"; deleteButton.hidden = !isCustom; saveStatus.textContent = ""; dialog.showModal(); titleInput.focus();
+        }};
+        grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{
+          const override = state.overrides[card.dataset.recipeId]; if (override) updateCard(card, override);
+        }});
+        state.custom.forEach((recipe) => grid.append(createCard(recipe)));
+        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", notes: "" }}, true));
+        document.getElementById("cancel-recipe").addEventListener("click", () => dialog.close());
+        grid.addEventListener("click", (event) => {{
+          const button = event.target.closest(".edit-recipe"); if (!button) return;
+          const card = button.closest("[data-recipe-id]"); openEditor(recipeFromCard(card), !baseIds.has(card.dataset.recipeId));
+        }});
+        form.addEventListener("submit", (event) => {{
+          event.preventDefault();
+          const existingId = idInput.value;
+          const recipe = {{ id: existingId || `custom-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`, title: titleInput.value.trim(), recipeUrl: safeLink(recipeUrlInput.value.trim()), sourceUrl: safeLink(sourceUrlInput.value.trim()), imageUrl: safeLink(imageUrlInput.value.trim()), notes: notesInput.value.trim() }};
+          if (!recipe.title) return;
+          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
+          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
+          save(); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.prepend(createCard(recipe));
+          saveStatus.textContent = "Saved in this browser."; setTimeout(() => dialog.close(), 350);
+        }});
+        deleteButton.addEventListener("click", () => {{
+          const id = idInput.value; if (!id || baseIds.has(id)) return;
+          state.custom = state.custom.filter((recipe) => recipe.id !== id); save(); grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove(); dialog.close();
+        }});
+      }})();
+    </script>
   </body>
 </html>
 """
