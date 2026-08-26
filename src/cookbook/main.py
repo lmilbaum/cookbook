@@ -18,6 +18,7 @@ from .dependencies import load_dotenv_loader
 from .models import PostRecord
 from .report_html import (
     render_html,
+    render_notes_html,
     render_shopping_list_html,
     write_favicon,
 )
@@ -514,6 +515,11 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     shopping_list_path = html_path.with_name("shopping_list.html")
     shopping_list_path.write_text(
         render_shopping_list_html(favicon_href=favicon_path.name),
+        encoding="utf-8",
+    )
+    notes_path = html_path.with_name("notes.html")
+    notes_path.write_text(
+        render_notes_html(report_posts, favicon_href=favicon_path.name),
         encoding="utf-8",
     )
     if not config.ignore_cached_posts:

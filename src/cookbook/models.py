@@ -21,3 +21,4 @@ class PostRecord:  # pylint: disable=too-many-instance-attributes
     title: str = ""
     recipe_url: str = ""
     recipe_urls: list[str] = field(default_factory=list)
+    recipe_names: list[str] = field(default_factory=list)

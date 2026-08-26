@@ -1,6 +1,6 @@
 # cspell:words lizapanelim
 username = "lizapanelim"
-limit = 5
+limit = 6
 output = "lizapanelim_posts.json"
 reverse = true
 login_user = "lmilbaum"

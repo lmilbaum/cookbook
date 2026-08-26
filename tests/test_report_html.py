@@ -8,9 +8,11 @@ import unittest
 
 from cookbook.models import PostRecord
 from cookbook.report_html import (
+    _recipe_name_from_url,
     _recipe_urls_for_post,
     _title_for_post,
     render_html,
+    render_notes_html,
 )
 
 
@@ -36,6 +38,14 @@ def make_post(**overrides: object) -> PostRecord:
 
 
 class RecipeDataTests(unittest.TestCase):
+    def test_recipe_name_is_derived_from_encoded_url_slug(self) -> None:
+        self.assertEqual(
+            _recipe_name_from_url(
+                "https://example.com/%D7%A4%D7%90%D7%99-%D7%AA%D7%A4%D7%95%D7%97%D7%99%D7%9D/"
+            ),
+            "פאי תפוחים",
+        )
+
     def test_recipe_urls_are_trimmed_deduplicated_and_ordered(self) -> None:
         post = make_post(
             recipe_url=" https://recipes.example/primary ",
@@ -87,6 +97,7 @@ class RenderHtmlTests(unittest.TestCase):
                     "title": post.title,
                     "sourceUrl": post.url,
                     "recipeUrl": post.recipe_url,
+                    "recipeName": "primary",
                     "imageUrl": post.image_url,
                     "notes": "",
                 },
@@ -111,9 +122,6 @@ class RenderHtmlTests(unittest.TestCase):
             'id="recipe-url"',
             'id="source-url"',
             'id="image-url"',
-            'id="recipe-notes"',
-            'dir="rtl"',
-            "הערות",
             'id="delete-recipe"',
             'class="edit-recipe"',
             'const storageKey = "cookbook-recipe-changes-v1"',
@@ -122,18 +130,51 @@ class RenderHtmlTests(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, document)
 
-    def test_notes_are_stored_and_rendered_as_text(self) -> None:
-        document = render_html([make_post()], "user", "favicon.svg")
+    def test_recipe_link_shows_the_linked_recipe_name(self) -> None:
+        document = render_html(
+            [make_post(recipe_url="https://example.com/roasted-vegetables/")],
+            "user",
+            "favicon.svg",
+        )
 
-        self.assertIn('<p class="recipe-notes" hidden></p>', document)
-        self.assertIn('notes: notesInput.value.trim()', document)
-        self.assertIn('notes.textContent = recipe.notes || ""', document)
-        self.assertNotIn("notes.innerHTML", document)
+        self.assertIn(">roasted vegetables</a>", document)
+
+    def test_recipe_link_prefers_the_page_title_when_available(self) -> None:
+        document = render_html(
+            [
+                make_post(
+                    recipe_url="https://example.com/avocado-salad/",
+                    recipe_names=["סלט אבוקדו הכל וסלט סלק לזלול!"],
+                )
+            ],
+            "user",
+            "favicon.svg",
+        )
+
+        self.assertIn('dir="auto">סלט אבוקדו הכל וסלט סלק לזלול!</a>', document)
+        self.assertIn('target="cookbook-recipe-recipe-1"', document)
+        self.assertIn('"recipeName": "סלט אבוקדו הכל וסלט סלק לזלול!"', html.unescape(document))
+
+    def test_each_recipe_links_to_its_own_notes_page(self) -> None:
+        cookbook = render_html([make_post()], "user", "favicon.svg")
+        notes = render_notes_html([make_post()], "favicon.svg")
+
+        self.assertIn('href="notes.html?id=recipe-1"', cookbook)
+        self.assertNotIn('id="recipe-notes"', cookbook)
+        self.assertIn('const scrollStorageKey = "cookbook-main-scroll-position"', cookbook)
+        self.assertIn("sessionStorage.setItem(scrollStorageKey, String(window.scrollY))", cookbook)
+        self.assertIn("window.scrollTo(0, Number(savedScrollPosition) || 0)", cookbook)
+        self.assertIn("<title>Recipe notes</title>", notes)
+        self.assertIn('class="notes-grid"', notes)
+        self.assertIn('new URLSearchParams(window.location.search).get("id")', notes)
+        self.assertIn('candidate.id === recipeId', notes)
+        self.assertIn('input.dir = "rtl"', notes)
+        self.assertIn('localStorage.setItem(storageKey, JSON.stringify(state))', notes)
 
     def test_renders_empty_title_element_so_existing_card_can_be_edited(self) -> None:
         document = render_html([make_post(title="", caption="")], "user", "favicon.svg")
 
-        self.assertIn('<h2 class="card-title"></h2>', document)
+        self.assertIn('<h2 class="card-title" dir="auto"></h2>', document)
         self.assertIn('data-recipe-id="recipe-1"', document)
 
     def test_empty_report_still_contains_add_recipe_interface(self) -> None:
