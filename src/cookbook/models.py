@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class PostRecord:  # pylint: disable=too-many-instance-attributes
+class PostItem:  # pylint: disable=too-many-instance-attributes
     """Serializable post data exported to JSON and HTML reports."""
 
     shortcode: str

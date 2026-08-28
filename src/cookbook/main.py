@@ -15,7 +15,7 @@ from .api_method import InstagramUnauthorizedError, fetch_posts_api
 from .browser_scraper import fetch_posts_browser
 from .config import AppConfig, load_config, parse_args, resolve_from
 from .dependencies import load_dotenv_loader
-from .models import PostRecord
+from .models import PostItem
 from .report_html import (
     render_html,
     render_notes_html,
@@ -34,7 +34,7 @@ def _find_cached_asset(assets_dir: Path, shortcode: str) -> Path | None:
     return None
 
 
-def _prune_cached_assets(posts: list[PostRecord], output_path: Path) -> None:
+def _prune_cached_assets(posts: list[PostItem], output_path: Path) -> None:
     """Remove cached assets that are not part of the current report."""
 
     assets_dir = output_path.with_name(f"{output_path.stem}_assets")
@@ -53,16 +53,16 @@ def _prune_cached_assets(posts: list[PostRecord], output_path: Path) -> None:
 
 # pylint: disable=too-many-locals
 def _cache_images_for_report(
-    posts: list[PostRecord],
+    posts: list[PostItem],
     output_path: Path,
     reuse_cached_assets: bool = True,
-) -> list[PostRecord]:
+) -> list[PostItem]:
     """Download image URLs to local files for robust HTML rendering."""
 
     assets_dir = output_path.with_name(f"{output_path.stem}_assets")
     assets_dir.mkdir(parents=True, exist_ok=True)
 
-    cached_posts: list[PostRecord] = []
+    cached_posts: list[PostItem] = []
     for post in posts:
         image_url = post.image_url.strip()
         if not image_url.startswith("http"):
@@ -178,7 +178,7 @@ def _seen_posts_path(output_path: Path) -> Path:
 def _post_store_path(output_path: Path) -> Path:
     """Return the write-once directory used as the post source of truth."""
 
-    return output_path.with_name(f"{output_path.stem}_records")
+    return output_path.with_name(f"{output_path.stem}_items")
 
 
 def _titles_path(output_path: Path) -> Path:
@@ -208,29 +208,33 @@ def _load_titles(titles_path: Path) -> dict[str, str]:
     return payload
 
 
-def _load_post_store(store_path: Path) -> list[PostRecord]:
-    """Load all valid post records from the immutable per-post store."""
+def _load_post_store(store_path: Path, reverse: bool = False) -> list[PostItem]:
+    """Load stored posts in the same chronological order as fetched posts."""
 
     if not store_path.exists():
         return []
 
-    posts: list[PostRecord] = []
-    for record_path in sorted(store_path.glob("*.json")):
+    posts: list[PostItem] = []
+    for item_path in sorted(store_path.glob("*.json")):
         try:
-            payload = json.loads(record_path.read_text(encoding="utf-8"))
-            posts.append(PostRecord(**payload))
+            payload = json.loads(item_path.read_text(encoding="utf-8"))
+            posts.append(PostItem(**payload))
         except (OSError, json.JSONDecodeError, TypeError) as exc:
-            raise ValueError(f"Invalid post record: {record_path}") from exc
-    return posts
+            raise ValueError(f"Invalid post item: {item_path}") from exc
+    return sorted(
+        posts,
+        key=lambda post: post.timestamp_utc,
+        reverse=not reverse,
+    )
 
 
-def _write_post_records(store_path: Path, posts: list[PostRecord]) -> None:
-    """Write new post records without ever replacing existing records."""
+def _write_post_items(store_path: Path, posts: list[PostItem]) -> None:
+    """Write new post items without ever replacing existing items."""
 
     store_path.mkdir(parents=True, exist_ok=True)
     for post in posts:
-        record_path = store_path / f"{post.shortcode}.json"
-        if record_path.exists():
+        item_path = store_path / f"{post.shortcode}.json"
+        if item_path.exists():
             continue
 
         temporary_path = store_path / f".{post.shortcode}.json.tmp"
@@ -238,36 +242,36 @@ def _write_post_records(store_path: Path, posts: list[PostRecord]) -> None:
             json.dumps(asdict(post), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        temporary_path.replace(record_path)
+        temporary_path.replace(item_path)
 
 
-def _migrate_titles_to_post_records(store_path: Path, titles: dict[str, str]) -> None:
-    """Copy legacy sidecar titles into the corresponding post records."""
+def _migrate_titles_to_post_items(store_path: Path, titles: dict[str, str]) -> None:
+    """Copy legacy sidecar titles into the corresponding post items."""
 
     for shortcode, title in titles.items():
         title = title.strip()
-        record_path = store_path / f"{shortcode}.json"
-        if not title or not record_path.exists():
+        item_path = store_path / f"{shortcode}.json"
+        if not title or not item_path.exists():
             continue
 
         try:
-            payload = json.loads(record_path.read_text(encoding="utf-8"))
+            payload = json.loads(item_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Invalid post record: {record_path}") from exc
+            raise ValueError(f"Invalid post item: {item_path}") from exc
         if payload.get("title", "").strip() == title:
             continue
 
         payload["title"] = title
-        temporary_path = record_path.with_name(f".{record_path.name}.tmp")
+        temporary_path = item_path.with_name(f".{item_path.name}.tmp")
         temporary_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        temporary_path.replace(record_path)
+        temporary_path.replace(item_path)
 
 
-def _apply_titles(posts: list[PostRecord], titles: dict[str, str]) -> list[PostRecord]:
-    """Apply legacy sidecar titles to newly fetched records."""
+def _apply_titles(posts: list[PostItem], titles: dict[str, str]) -> list[PostItem]:
+    """Apply legacy sidecar titles to newly fetched items."""
 
     return [
         replace(post, title=titles.get(post.shortcode, post.title).strip())
@@ -322,7 +326,7 @@ def _write_seen_shortcodes(seen_path: Path, shortcodes: set[str]) -> None:
     temporary_path.replace(seen_path)
 
 
-def _load_existing_posts(output_path: Path) -> list[PostRecord]:
+def _load_existing_posts(output_path: Path) -> list[PostItem]:
     """Load previously exported posts so reports keep history."""
 
     if not output_path.exists():
@@ -338,12 +342,12 @@ def _load_existing_posts(output_path: Path) -> list[PostRecord]:
     if not isinstance(payload, list):
         raise TypeError(f"Existing output must contain a list of posts: {output_path}")
 
-    posts: list[PostRecord] = []
+    posts: list[PostItem] = []
     for post in payload:
         if not isinstance(post, dict):
             raise TypeError(f"Existing output contains an invalid post: {output_path}")
         try:
-            posts.append(PostRecord(**post))
+            posts.append(PostItem(**post))
         except TypeError as exc:
             raise ValueError(
                 f"Existing output contains malformed post fields: {output_path}"
@@ -352,13 +356,13 @@ def _load_existing_posts(output_path: Path) -> list[PostRecord]:
 
 
 def _merge_posts(
-    existing_posts: list[PostRecord],
-    new_posts: list[PostRecord],
+    existing_posts: list[PostItem],
+    new_posts: list[PostItem],
     reverse: bool,
-) -> list[PostRecord]:
+) -> list[PostItem]:
     """Merge old and new posts by shortcode while preserving configured ordering."""
 
-    merged: list[PostRecord] = []
+    merged: list[PostItem] = []
     seen_shortcodes: set[str] = set()
     ordered_posts = (existing_posts + new_posts) if reverse else (new_posts + existing_posts)
 
@@ -375,7 +379,7 @@ def _fetch_posts_browser_only(
     login_user: str,
     password: str,
     seen_shortcodes: set[str],
-) -> list[PostRecord]:
+) -> list[PostItem]:
     """Fetch via browser scraper, validating required credentials."""
 
     if not login_user:
@@ -400,7 +404,7 @@ def _fetch_posts_with_fallback(
     login_user: str,
     password: str,
     seen_shortcodes: set[str],
-) -> list[PostRecord]:
+) -> list[PostItem]:
     """Try API first, then fall back to browser scraping on unauthorized response."""
 
     cooldown_path = _cooldown_marker_path(config.session_file)
@@ -454,13 +458,13 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     seen_shortcodes = _load_seen_shortcodes(seen_path, output_path)
     titles = _load_titles(titles_path)
     fetch_seen_shortcodes = set() if config.ignore_cached_posts else seen_shortcodes
-    existing_posts: list[PostRecord] = []
+    existing_posts: list[PostItem] = []
     if not config.ignore_cached_posts:
-        _migrate_titles_to_post_records(store_path, titles)
-        existing_posts = _load_post_store(store_path)
+        _migrate_titles_to_post_items(store_path, titles)
+        existing_posts = _load_post_store(store_path, reverse=config.reverse)
         if not existing_posts and output_path.exists():
             existing_posts = _load_existing_posts(output_path)
-            _write_post_records(store_path, existing_posts)
+            _write_post_items(store_path, existing_posts)
         fetch_seen_shortcodes |= {post.shortcode for post in existing_posts}
         if config.feed_position_from_end > 0:
             fetch_seen_shortcodes = {post.shortcode for post in existing_posts}
@@ -480,7 +484,7 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     )
     new_posts = _apply_titles(new_posts, titles)
     if not config.ignore_cached_posts:
-        _write_post_records(store_path, new_posts)
+        _write_post_items(store_path, new_posts)
     merged_posts = new_posts if config.ignore_cached_posts else _merge_posts(
         existing_posts,
         new_posts,

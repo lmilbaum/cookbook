@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .models import PostRecord
+from .models import PostItem
 
 
 def _normalize_instagram_image_url(image_url: str) -> str:
@@ -342,7 +342,7 @@ def _extract_caption(page: Any) -> str:
     return ""
 
 
-def _fetch_post_details(page: Any, media_path: str, timeout_seconds: int) -> PostRecord:
+def _fetch_post_details(page: Any, media_path: str, timeout_seconds: int) -> PostItem:
     """Fetch details for a single post or reel by navigating to its page."""
 
     post_url = f"https://www.instagram.com{media_path}"
@@ -375,7 +375,7 @@ def _fetch_post_details(page: Any, media_path: str, timeout_seconds: int) -> Pos
     shortcode = _shortcode_from_media_path(media_path)
     is_video = media_path.startswith("/reel/")
 
-    return PostRecord(
+    return PostItem(
         shortcode=shortcode,
         url=post_url,
         image_url=image_url,
@@ -425,7 +425,7 @@ def fetch_posts_browser(
     session_file: str = ".instagram.session",
     seen_shortcodes: set[str] | None = None,
     feed_position_from_end: int = 0,
-) -> list[PostRecord]:
+) -> list[PostItem]:
     """Fetch Instagram posts using a headless browser with required authentication."""
 
     if not login_user:
@@ -504,7 +504,7 @@ def fetch_posts_browser(
             detail_context = _new_context(browser, browser_session, block_media=False)
             detail_page = detail_context.new_page()
 
-            posts: list[PostRecord] = []
+            posts: list[PostItem] = []
             for index, media_path in enumerate(media_paths, start=1):
                 posts.append(_fetch_post_details(detail_page, media_path, timeout_seconds))
                 print(f"  [{index}] Fetched media {media_path}")

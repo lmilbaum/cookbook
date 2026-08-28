@@ -10,22 +10,22 @@ from typing import Any
 
 from .config import AppConfig
 from .dependencies import load_instaloader
-from .models import PostRecord
+from .models import PostItem
 
 
 class InstagramUnauthorizedError(RuntimeError):
     """Raised when Instagram API returns unauthorized (401)."""
 
 
-def _post_to_record(post: Any) -> PostRecord:
-    """Convert an Instaloader post object to a serializable record."""
+def _post_to_item(post: Any) -> PostItem:
+    """Convert an Instaloader post object to a serializable item."""
 
     dt = post.date_utc
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     timestamp = dt.astimezone(UTC).isoformat()
 
-    return PostRecord(
+    return PostItem(
         shortcode=post.shortcode,
         url=f"https://www.instagram.com/p/{post.shortcode}/",
         image_url=str(getattr(post, "url", "") or ""),
@@ -97,7 +97,7 @@ def fetch_posts_api(
     config: AppConfig,
     login_user: str,
     seen_shortcodes: set[str] | None = None,
-) -> list[PostRecord]:
+) -> list[PostItem]:
     """Fetch posts using Instaloader API with retry/backoff."""
 
     _validate_fetch_settings(config)
@@ -109,21 +109,21 @@ def fetch_posts_api(
 
         try:
             profile = instaloader.Profile.from_username(loader.context, config.username)
-            records: list[PostRecord] = []
+            items: list[PostItem] = []
 
             # Instaloader yields posts from newest to oldest by default.
             for post in profile.get_posts():
                 if post.shortcode in seen_shortcodes:
                     continue
-                records.append(_post_to_record(post))
-                if 0 < config.limit <= len(records):
+                items.append(_post_to_item(post))
+                if 0 < config.limit <= len(items):
                     break
                 if config.request_delay_seconds > 0:
                     time.sleep(config.request_delay_seconds)
 
             if config.reverse:
-                records.reverse()
-            return records
+                items.reverse()
+            return items
         except instaloader.exceptions.ConnectionException as exc:
             message = str(exc)
             if _is_unauthorized_error(message):

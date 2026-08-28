@@ -7,11 +7,11 @@ import json
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from .models import PostRecord
+from .models import PostItem
 
 
-def _recipe_urls_for_post(post: PostRecord) -> list[str]:
-    """Return unique recipe URLs, supporting both old and new record formats."""
+def _recipe_urls_for_post(post: PostItem) -> list[str]:
+    """Return unique recipe URLs, supporting both old and new item formats."""
 
     urls = ([post.recipe_url] if post.recipe_url.strip() else []) + post.recipe_urls
     return list(dict.fromkeys(url.strip() for url in urls if url.strip()))
@@ -27,7 +27,7 @@ def _recipe_name_from_url(recipe_url: str) -> str:
     return " ".join(name.split()) or "Recipe"
 
 
-def _title_for_post(post: PostRecord, titles: dict[str, str]) -> str:
+def _title_for_post(post: PostItem, titles: dict[str, str]) -> str:
     """Prefer a user-provided title, then use the first caption line."""
 
     if post.title.strip():
@@ -42,7 +42,7 @@ def _title_for_post(post: PostRecord, titles: dict[str, str]) -> str:
 
 
 def render_html(
-    posts: list[PostRecord],
+    posts: list[PostItem],
     username: str,
     favicon_href: str,
     titles: dict[str, str] | None = None,
@@ -50,74 +50,31 @@ def render_html(
     """Render fetched posts into a standalone HTML document."""
 
     titles = titles or {}
-    cards: list[str] = []
+    base_recipes: list[dict[str, object]] = []
     for post in posts:
         title = _title_for_post(post, titles)
-        title_markup = f'<h2 class="card-title" dir="auto">{html.escape(title)}</h2>'
-
-        img_markup = ""
-        if post.image_url:
-            safe_image_url = html.escape(post.image_url, quote=True)
-            image_tag = (
-                f'<img src="{safe_image_url}" alt="Instagram media preview" '
-                'loading="lazy" />'
-            )
-            img_markup = (
-                f'<a href="{html.escape(post.url, quote=True)}" target="_blank" rel="noreferrer">'
-                f"{image_tag}</a>"
-            )
-
         recipe_urls = _recipe_urls_for_post(post)
-        primary_recipe_name = (
-            post.recipe_names[0].strip()
-            if post.recipe_names and post.recipe_names[0].strip()
-            else (_recipe_name_from_url(recipe_urls[0]) if recipe_urls else "")
-        )
-        recipe_markup = "\n".join(
-            '<p class="link-row">'
-            '<a href="'
-            f'{html.escape(recipe_url, quote=True)}'
-            f'" target="cookbook-recipe-{html.escape(post.shortcode, quote=True)}{f"-{index}" if index else ""}" rel="noreferrer" dir="auto">'
-            f'{html.escape(post.recipe_names[index] if index < len(post.recipe_names) and post.recipe_names[index].strip() else _recipe_name_from_url(recipe_url))}'
-            '</a>'
-            '</p>'
+        recipe_names = [
+            post.recipe_names[index].strip()
+            if index < len(post.recipe_names) and post.recipe_names[index].strip()
+            else _recipe_name_from_url(recipe_url)
             for index, recipe_url in enumerate(recipe_urls)
+        ]
+        base_recipes.append(
+            {
+                "id": post.shortcode,
+                "title": title,
+                "sourceUrl": post.url,
+                "recipeUrl": recipe_urls[0] if recipe_urls else "",
+                "recipeName": recipe_names[0] if recipe_names else "",
+                "recipeUrls": recipe_urls,
+                "recipeNames": recipe_names,
+                "imageUrl": post.image_url,
+                "notes": "",
+            }
         )
 
-        editor_data = html.escape(
-            json.dumps(
-                {
-                    "id": post.shortcode,
-                    "title": title,
-                    "sourceUrl": post.url,
-                    "recipeUrl": recipe_urls[0] if recipe_urls else "",
-                    "recipeName": primary_recipe_name,
-                    "imageUrl": post.image_url,
-                    "notes": "",
-                },
-                ensure_ascii=False,
-            ),
-            quote=True,
-        )
-
-        cards.append(
-            f"""
-      <article class=\"card\" data-recipe-id=\"{html.escape(post.shortcode, quote=True)}\" data-recipe=\"{editor_data}\">
-        {title_markup}
-        <p class=\"link-row source-link\">
-          <a href=\"{html.escape(post.url, quote=True)}\" target=\"_blank\" rel=\"noreferrer\">
-            אינסטגרם
-          </a>
-        </p>
-        <div class=\"recipe-links\">{recipe_markup}</div>
-        <p class=\"link-row notes-link\"><a href=\"notes.html?id={html.escape(post.shortcode, quote=True)}\">Notes</a></p>
-        <div class=\"card-image\">{img_markup}</div>
-        <button class=\"edit-recipe\" type=\"button\">Edit recipe</button>
-      </article>
-"""
-        )
-
-    cards_markup = "\n".join(cards) if cards else "<p>No posts found.</p>"
+    base_recipes_json = json.dumps(base_recipes, ensure_ascii=False).replace("<", "\\u003c")
     safe_username = html.escape(username)
     safe_favicon_href = html.escape(favicon_href, quote=True)
 
@@ -149,6 +106,8 @@ def render_html(
         margin: 0 0 10px;
       }}
       .source-link {{ text-align: right; direction: rtl; }}
+      .recipe-links {{ text-align: right; }}
+      .notes-link {{ text-align: right; }}
       .grid {{
         display: grid;
         gap: 16px;
@@ -205,9 +164,7 @@ def render_html(
         <button id="add-recipe" type="button">Add recipe</button>
       </div>
       <p class="link-row"><a href="shopping_list.html">Open shopping list</a></p>
-      <section class=\"grid\" id=\"recipe-grid\">
-{cards_markup}
-      </section>
+      <section class=\"grid\" id=\"recipe-grid\"></section>
     </main>
     <dialog id="recipe-dialog">
       <form class="recipe-form" id="recipe-form">
@@ -229,6 +186,7 @@ def render_html(
       (() => {{
         const storageKey = "cookbook-recipe-changes-v1";
         const scrollStorageKey = "cookbook-main-scroll-position";
+        const baseRecipes = {base_recipes_json};
         const grid = document.getElementById("recipe-grid");
         const dialog = document.getElementById("recipe-dialog");
         const form = document.getElementById("recipe-form");
@@ -240,7 +198,7 @@ def render_html(
         const imageUrlInput = document.getElementById("image-url");
         const deleteButton = document.getElementById("delete-recipe");
         const saveStatus = document.getElementById("save-status");
-        const baseIds = new Set([...grid.querySelectorAll("[data-recipe-id]")].map((card) => card.dataset.recipeId));
+        const baseIds = new Set(baseRecipes.map((recipe) => recipe.id));
         let state;
         try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
         catch {{ state = {{ overrides: {{}}, custom: [] }}; }}
@@ -273,16 +231,27 @@ def render_html(
           newSource.className ||= "link-row source-link"; newSource.hidden = !recipe.sourceUrl;
           source.replaceWith(newSource);
           const links = card.querySelector(".recipe-links"); links.replaceChildren();
-          const recipeLink = linkRow(safeLink(recipe.recipeUrl), recipe.recipeName || recipeNameFromUrl(recipe.recipeUrl), "", `cookbook-recipe-${{recipe.id}}`); if (recipeLink) links.append(recipeLink);
+          const recipeUrls = [...new Set([recipe.recipeUrl, ...(recipe.recipeUrls || [])].map(safeLink).filter(Boolean))];
+          recipeUrls.forEach((url, index) => {{
+            const nameIndex = (recipe.recipeUrls || []).indexOf(url);
+            const label = index === 0 && recipe.recipeName ? recipe.recipeName : (recipe.recipeNames || [])[nameIndex] || recipeNameFromUrl(url);
+            const target = `cookbook-recipe-${{recipe.id}}${{index ? `-${{index}}` : ""}}`;
+            const recipeLink = linkRow(url, label, "", target); if (recipeLink) links.append(recipeLink);
+          }});
           card.querySelector(".notes-link a").href = `notes.html?id=${{encodeURIComponent(recipe.id)}}`;
           const imageBox = card.querySelector(".card-image"); imageBox.replaceChildren();
           const imageUrl = safeLink(recipe.imageUrl);
-          if (imageUrl) {{ const image = document.createElement("img"); image.src = imageUrl; image.alt = recipe.title; image.loading = "lazy"; imageBox.append(image); }}
+          if (imageUrl) {{
+            const image = document.createElement("img"); image.src = imageUrl; image.alt = recipe.title; image.loading = "lazy";
+            const sourceUrl = safeLink(recipe.sourceUrl);
+            if (sourceUrl) {{ const imageLink = document.createElement("a"); imageLink.href = sourceUrl; imageLink.target = "_blank"; imageLink.rel = "noreferrer"; imageLink.append(image); imageBox.append(imageLink); }}
+            else imageBox.append(image);
+          }}
           card.dataset.recipe = JSON.stringify(recipe);
         }};
         const createCard = (recipe) => {{
           const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id;
-          card.innerHTML = '<h2 class="card-title" dir="auto"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><p class="link-row notes-link"><a>Notes</a></p><div class="card-image"></div><button class="edit-recipe" type="button">Edit recipe</button>';
+          card.innerHTML = '<h2 class="card-title" dir="auto"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><p class="link-row notes-link"><a>הערות</a></p><div class="card-image"></div><button class="edit-recipe" type="button">Edit recipe</button>';
           updateCard(card, recipe); return card;
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
@@ -291,14 +260,12 @@ def render_html(
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
           formTitle.textContent = recipe.id ? "Edit recipe" : "Add recipe"; deleteButton.hidden = !isCustom; saveStatus.textContent = ""; dialog.showModal(); titleInput.focus();
         }};
-        grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{
-          const override = state.overrides[card.dataset.recipeId];
-          if (override) {{
-            const baseRecipe = recipeFromCard(card);
-            updateCard(card, {{ ...baseRecipe, ...override, recipeName: override.recipeName || baseRecipe.recipeName }});
-          }}
+        baseRecipes.forEach((baseRecipe) => {{
+          const override = state.overrides[baseRecipe.id] || {{}};
+          grid.append(createCard({{ ...baseRecipe, ...override, recipeName: override.recipeName || baseRecipe.recipeName }}));
         }});
         state.custom.forEach((recipe) => grid.append(createCard(recipe)));
+        if (!grid.children.length) grid.innerHTML = "<p>No posts found.</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
         if (savedScrollPosition !== null) {{
           sessionStorage.removeItem(scrollStorageKey);
@@ -319,7 +286,23 @@ def render_html(
           event.preventDefault();
           const existingId = idInput.value;
           const previous = existingId ? recipeFromCard(grid.querySelector(`[data-recipe-id="${{CSS.escape(existingId)}}"]`)) : {{}};
-          const recipe = {{ id: existingId || `custom-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`, title: titleInput.value.trim(), recipeUrl: safeLink(recipeUrlInput.value.trim()), recipeName: previous.recipeName || "", sourceUrl: safeLink(sourceUrlInput.value.trim()), imageUrl: safeLink(imageUrlInput.value.trim()), notes: previous.notes || "" }};
+          const recipeUrl = safeLink(recipeUrlInput.value.trim());
+          const extraRecipeLinks = (previous.recipeUrls || [])
+            .map((url, index) => ({{ url, name: (previous.recipeNames || [])[index] || recipeNameFromUrl(url) }}))
+            .filter((link) => link.url !== previous.recipeUrl && link.url !== recipeUrl);
+          const recipeName = recipeUrl === previous.recipeUrl ? previous.recipeName || "" : recipeNameFromUrl(recipeUrl);
+          const recipe = {{
+            ...previous,
+            id: existingId || `custom-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`,
+            title: titleInput.value.trim(),
+            recipeUrl,
+            recipeName,
+            recipeUrls: [recipeUrl, ...extraRecipeLinks.map((link) => link.url)].filter(Boolean),
+            recipeNames: [recipeName, ...extraRecipeLinks.map((link) => link.name)].filter(Boolean),
+            sourceUrl: safeLink(sourceUrlInput.value.trim()),
+            imageUrl: safeLink(imageUrlInput.value.trim()),
+            notes: previous.notes || "",
+          }};
           if (!recipe.title) return;
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
@@ -337,7 +320,7 @@ def render_html(
 """
 
 
-def render_notes_html(posts: list[PostRecord], favicon_href: str) -> str:
+def render_notes_html(posts: list[PostItem], favicon_href: str) -> str:
     """Render recipe notes on their own page, sharing cookbook local storage."""
 
     base_recipes = [

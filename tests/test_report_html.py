@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import html
 import json
 import unittest
 
-from cookbook.models import PostRecord
+from cookbook.models import PostItem
 from cookbook.report_html import (
     _recipe_name_from_url,
     _recipe_urls_for_post,
@@ -16,7 +15,7 @@ from cookbook.report_html import (
 )
 
 
-def make_post(**overrides: object) -> PostRecord:
+def make_post(**overrides: object) -> PostItem:
     """Build a representative post, allowing individual fields to be replaced."""
 
     values: dict[str, object] = {
@@ -34,7 +33,7 @@ def make_post(**overrides: object) -> PostRecord:
         "recipe_urls": ["https://recipes.example/secondary"],
     }
     values.update(overrides)
-    return PostRecord(**values)  # type: ignore[arg-type]
+    return PostItem(**values)  # type: ignore[arg-type]
 
 
 class RecipeDataTests(unittest.TestCase):
@@ -64,10 +63,10 @@ class RecipeDataTests(unittest.TestCase):
             ],
         )
 
-    def test_title_precedence_is_record_sidecar_caption_then_empty(self) -> None:
+    def test_title_precedence_is_item_sidecar_caption_then_empty(self) -> None:
         self.assertEqual(
-            _title_for_post(make_post(title=" Record title "), {"recipe-1": "Sidecar"}),
-            "Record title",
+            _title_for_post(make_post(title=" Item title "), {"recipe-1": "Sidecar"}),
+            "Item title",
         )
         self.assertEqual(
             _title_for_post(make_post(title=""), {"recipe-1": " Sidecar title "}),
@@ -81,7 +80,7 @@ class RecipeDataTests(unittest.TestCase):
 
 
 class RenderHtmlTests(unittest.TestCase):
-    def test_renders_editor_data_as_escaped_json(self) -> None:
+    def test_renders_base_recipe_data_as_json(self) -> None:
         post = make_post(
             shortcode='recipe"<&',
             title='Pasta "special" <hot>',
@@ -90,25 +89,23 @@ class RenderHtmlTests(unittest.TestCase):
         )
 
         document = render_html([post], "user", "favicon.svg")
-        expected_data = html.escape(
-            json.dumps(
-                {
-                    "id": post.shortcode,
-                    "title": post.title,
-                    "sourceUrl": post.url,
-                    "recipeUrl": post.recipe_url,
-                    "recipeName": "primary",
-                    "imageUrl": post.image_url,
-                    "notes": "",
-                },
-                ensure_ascii=False,
-            ),
-            quote=True,
+        expected_data = json.dumps(
+            {
+                "id": post.shortcode,
+                "title": post.title,
+                "sourceUrl": post.url,
+                "recipeUrl": post.recipe_url,
+                "recipeName": "primary",
+                "recipeUrls": [post.recipe_url, *post.recipe_urls],
+                "recipeNames": ["primary", "secondary"],
+                "imageUrl": post.image_url,
+                "notes": "",
+            },
+            ensure_ascii=False,
         )
+        expected_script_data = expected_data.replace("<", "\\u003c")
 
-        self.assertIn(f'data-recipe-id="{html.escape(post.shortcode, quote=True)}"', document)
-        self.assertIn(f'data-recipe="{expected_data}"', document)
-        self.assertIn("Pasta &quot;special&quot; &lt;hot&gt;", document)
+        self.assertIn(f"const baseRecipes = [{expected_script_data}]", document)
         self.assertNotIn('<hot>', document)
 
     def test_renders_recipe_editor_controls_and_persistence_wiring(self) -> None:
@@ -137,7 +134,9 @@ class RenderHtmlTests(unittest.TestCase):
             "favicon.svg",
         )
 
-        self.assertIn(">roasted vegetables</a>", document)
+        self.assertIn('"recipeName": "roasted vegetables"', document)
+        self.assertIn(".recipe-links { text-align: right; }", document)
+        self.assertIn(".notes-link { text-align: right; }", document)
 
     def test_recipe_link_prefers_the_page_title_when_available(self) -> None:
         document = render_html(
@@ -151,15 +150,15 @@ class RenderHtmlTests(unittest.TestCase):
             "favicon.svg",
         )
 
-        self.assertIn('dir="auto">סלט אבוקדו הכל וסלט סלק לזלול!</a>', document)
-        self.assertIn('target="cookbook-recipe-recipe-1"', document)
-        self.assertIn('"recipeName": "סלט אבוקדו הכל וסלט סלק לזלול!"', html.unescape(document))
+        self.assertIn('"recipeName": "סלט אבוקדו הכל וסלט סלק לזלול!"', document)
+        self.assertIn('const target = `cookbook-recipe-${recipe.id}', document)
 
     def test_each_recipe_links_to_its_own_notes_page(self) -> None:
         cookbook = render_html([make_post()], "user", "favicon.svg")
         notes = render_notes_html([make_post()], "favicon.svg")
 
-        self.assertIn('href="notes.html?id=recipe-1"', cookbook)
+        self.assertIn('card.querySelector(".notes-link a").href = `notes.html?id=', cookbook)
+        self.assertIn('<p class="link-row notes-link"><a>הערות</a></p>', cookbook)
         self.assertNotIn('id="recipe-notes"', cookbook)
         self.assertIn('const scrollStorageKey = "cookbook-main-scroll-position"', cookbook)
         self.assertIn("sessionStorage.setItem(scrollStorageKey, String(window.scrollY))", cookbook)
@@ -175,7 +174,13 @@ class RenderHtmlTests(unittest.TestCase):
         document = render_html([make_post(title="", caption="")], "user", "favicon.svg")
 
         self.assertIn('<h2 class="card-title" dir="auto"></h2>', document)
-        self.assertIn('data-recipe-id="recipe-1"', document)
+        self.assertIn('"id": "recipe-1", "title": ""', document)
+
+    def test_existing_and_custom_recipes_use_the_same_card_factory(self) -> None:
+        document = render_html([make_post()], "user", "favicon.svg")
+
+        self.assertIn("grid.append(createCard({ ...baseRecipe, ...override", document)
+        self.assertIn("state.custom.forEach((recipe) => grid.append(createCard(recipe)))", document)
 
     def test_empty_report_still_contains_add_recipe_interface(self) -> None:
         document = render_html([], "user", "favicon.svg")
