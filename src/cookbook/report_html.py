@@ -83,7 +83,7 @@ def render_html(
   <head>
     <meta charset=\"UTF-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-    <title>Liora's cookbook</title>
+    <title>ספר המתכונים שלי</title>
     <link rel=\"icon\" type=\"image/svg+xml\" href=\"{safe_favicon_href}\" />
     <style>
       body {{
@@ -100,8 +100,8 @@ def render_html(
       h1 {{
         margin: 0 0 8px;
       }}
-      .page-header {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }}
-      .page-header h1 {{ margin: 0; }}
+      .page-header {{ display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }}
+      .page-header h1 {{ margin: 0; text-align: right; direction: rtl; }}
       .link-row {{
         margin: 0 0 10px;
       }}
@@ -160,7 +160,7 @@ def render_html(
   <body>
     <main>
       <div class="page-header">
-        <h1>Liora's cookbook</h1>
+        <h1>ספר המתכונים שלי</h1>
         <button id="add-recipe" type="button">Add recipe</button>
       </div>
       <p class="link-row"><a href="shopping_list.html">Open shopping list</a></p>
