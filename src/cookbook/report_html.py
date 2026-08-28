@@ -161,7 +161,7 @@ def render_html(
     <main>
       <div class="page-header">
         <h1>ספר המתכונים שלי</h1>
-        <button id="add-recipe" type="button">Add recipe</button>
+        <button id="add-recipe" type="button">הוסף מתכון</button>
       </div>
       <p class="link-row"><a href="shopping_list.html">Open shopping list</a></p>
       <section class=\"grid\" id=\"recipe-grid\"></section>
