@@ -163,7 +163,7 @@ def render_html(
         <h1>ספר המתכונים שלי</h1>
         <button id="add-recipe" type="button">הוסף מתכון</button>
       </div>
-      <p class="link-row"><a href="shopping_list.html">Open shopping list</a></p>
+      <p class="link-row"><a href="shopping_list.html">רשימת הקניות</a></p>
       <section class=\"grid\" id=\"recipe-grid\"></section>
     </main>
     <dialog id="recipe-dialog">
