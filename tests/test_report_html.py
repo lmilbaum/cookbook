@@ -192,8 +192,14 @@ class RenderHtmlTests(unittest.TestCase):
     def test_existing_and_custom_recipes_use_the_same_card_factory(self) -> None:
         document = render_html([make_post()], "user", "favicon.svg")
 
-        self.assertIn("grid.append(createCard({ ...baseRecipe, ...override", document)
-        self.assertIn("state.custom.forEach((recipe) => grid.append(createCard(recipe)))", document)
+        self.assertIn("const recipesById = new Map(allRecipes()", document)
+        self.assertIn("state.order.forEach((id) => grid.append(createCard(recipesById.get(id))))", document)
+
+    def test_new_recipes_are_appended_to_the_shared_collection_order(self) -> None:
+        document = render_html([make_post()], "user", "favicon.svg")
+
+        self.assertIn("if (!state.order.includes(recipe.id)) state.order.push(recipe.id)", document)
+        self.assertIn("else grid.append(createCard(recipe))", document)
 
     def test_custom_recipe_link_uses_the_entered_title_not_the_url_filename(self) -> None:
         document = render_html([make_post()], "user", "favicon.svg")

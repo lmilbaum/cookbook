@@ -218,6 +218,18 @@ def render_html(
         if (!state || typeof state !== "object") state = {{ overrides: {{}}, custom: [] }};
         state.overrides ||= {{}};
         state.custom ||= [];
+        const allRecipes = () => baseRecipes
+          .map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}), recipeName: state.overrides[recipe.id]?.recipeName || recipe.recipeName }}))
+          .concat(state.custom);
+        const availableIds = new Set(allRecipes().map((recipe) => recipe.id));
+        if (!Array.isArray(state.order)) {{
+          const baseOrder = baseRecipes.map((recipe) => recipe.id);
+          const newestBaseId = baseOrder.pop();
+          state.order = [...baseOrder, ...state.custom.map((recipe) => recipe.id)];
+          if (newestBaseId) state.order.push(newestBaseId);
+        }}
+        state.order = state.order.filter((id) => availableIds.has(id));
+        allRecipes().forEach((recipe) => {{ if (!state.order.includes(recipe.id)) state.order.push(recipe.id); }});
 
         const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
         const safeLink = (value) => {{
@@ -296,11 +308,9 @@ def render_html(
           instructionsInput.value = recipe.instructions || "";
           formTitle.textContent = recipe.id ? "Edit recipe" : "Add recipe"; deleteButton.hidden = !isCustom; saveStatus.textContent = ""; dialog.showModal(); titleInput.focus();
         }};
-        baseRecipes.forEach((baseRecipe) => {{
-          const override = state.overrides[baseRecipe.id] || {{}};
-          grid.append(createCard({{ ...baseRecipe, ...override, recipeName: override.recipeName || baseRecipe.recipeName }}));
-        }});
-        state.custom.forEach((recipe) => grid.append(createCard(recipe)));
+        const recipesById = new Map(allRecipes().map((recipe) => [recipe.id, recipe]));
+        state.order.forEach((id) => grid.append(createCard(recipesById.get(id))));
+        save();
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
         if (!grid.children.length) grid.innerHTML = "<p>No posts found.</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
@@ -357,13 +367,14 @@ def render_html(
           if (!recipe.title) return;
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
-          save(); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.prepend(createCard(recipe));
+          if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
+          save(); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.append(createCard(recipe));
           grid.querySelectorAll("[data-recipe-id]").forEach((recipeCard) => updateCard(recipeCard, recipeFromCard(recipeCard)));
           saveStatus.textContent = "Saved in this browser."; setTimeout(() => dialog.close(), 350);
         }});
         deleteButton.addEventListener("click", () => {{
           const id = idInput.value; if (!id || baseIds.has(id)) return;
-          state.custom = state.custom.filter((recipe) => recipe.id !== id); save(); grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
+          state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); save(); grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
           dialog.close();
         }});
