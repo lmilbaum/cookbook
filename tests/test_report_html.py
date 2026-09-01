@@ -12,6 +12,7 @@ from cookbook.report_html import (
     _title_for_post,
     render_html,
     render_notes_html,
+    render_shopping_list_html,
 )
 
 
@@ -99,6 +100,8 @@ class RenderHtmlTests(unittest.TestCase):
                 "recipeUrls": [post.recipe_url, *post.recipe_urls],
                 "recipeNames": ["primary", "secondary"],
                 "imageUrl": post.image_url,
+                "instructions": "",
+                "prerequisiteId": "",
                 "notes": "",
             },
             ensure_ascii=False,
@@ -119,6 +122,7 @@ class RenderHtmlTests(unittest.TestCase):
             'id="recipe-url"',
             'id="source-url"',
             'id="image-url"',
+            'id="recipe-instructions"',
             'id="delete-recipe"',
             'class="edit-recipe"',
             'const storageKey = "cookbook-recipe-changes-v1"',
@@ -126,6 +130,15 @@ class RenderHtmlTests(unittest.TestCase):
         ):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, document)
+
+        self.assertIn('instructions: instructionsInput.value.trim()', document)
+        self.assertIn('<h3>הוראות הכנה</h3><pre></pre>', document)
+        self.assertIn('<span>דרוש הכנה של</span><select aria-label="דרוש הכנה של">', document)
+        self.assertIn('class="prerequisite-link">למתכון</a>', document)
+        self.assertIn('`#recipe-${encodeURIComponent(prerequisiteSelect.value)}`', document)
+        self.assertIn('.recipe-prerequisite { display: flex; align-items: center;', document)
+        self.assertIn('event.target.closest(".recipe-prerequisite select")', document)
+        self.assertIn('prerequisiteId: select.value', document)
 
     def test_recipe_link_shows_the_linked_recipe_name(self) -> None:
         document = render_html(
@@ -182,12 +195,33 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn("grid.append(createCard({ ...baseRecipe, ...override", document)
         self.assertIn("state.custom.forEach((recipe) => grid.append(createCard(recipe)))", document)
 
+    def test_custom_recipe_link_uses_the_entered_title_not_the_url_filename(self) -> None:
+        document = render_html([make_post()], "user", "favicon.svg")
+
+        self.assertIn("index === 0 && !baseIds.has(recipe.id)", document)
+        self.assertIn("const recipeName = isCustomRecipe", document)
+        self.assertIn("? title", document)
+
     def test_empty_report_still_contains_add_recipe_interface(self) -> None:
         document = render_html([], "user", "favicon.svg")
 
         self.assertIn("<p>No posts found.</p>", document)
         self.assertIn('id="add-recipe"', document)
         self.assertIn('id="recipe-dialog"', document)
+
+    def test_shopping_list_can_be_sent_to_trello(self) -> None:
+        document = render_shopping_list_html("favicon.svg")
+
+        self.assertNotIn('id="share-list"', document)
+        self.assertIn('id="send-to-trello"', document)
+        self.assertIn('<span>ייצוא ל־</span><bdi>Trello</bdi>', document)
+        self.assertNotIn("navigator.share", document)
+        self.assertIn('fetch("/api/trello/cards"', document)
+        self.assertIn('setBidiStatus(statusText, "My To Do List", ". ")', document)
+        self.assertIn('setBidiStatus("מייצא את רשימת הקניות ל־", "Trello", "…")', document)
+        self.assertNotIn("https://trello.com/add-card?", document)
+        self.assertIn('fetch("/api/shopping-list"', document)
+        self.assertIn('method: "PUT"', document)
 
 
 if __name__ == "__main__":

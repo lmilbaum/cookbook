@@ -10,6 +10,8 @@ __pycache__/
 *_posts.json
 *_posts.html
 shopping_list.html
+shopping_list.json
+shopping_list.json.tmp
 notes.html
 *_posts.seen.json*
 *_posts_assets/

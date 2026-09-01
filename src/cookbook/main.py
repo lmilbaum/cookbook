@@ -532,13 +532,15 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
             seen_shortcodes | {post.shortcode for post in merged_posts},
         )
 
-    was_opened = webbrowser.open(html_path.resolve().as_uri())
-    if not was_opened:
-        raise RuntimeError(f"Failed to open HTML report: {html_path}")
+    if not args.no_open:
+        was_opened = webbrowser.open(html_path.resolve().as_uri())
+        if not was_opened:
+            raise RuntimeError(f"Failed to open HTML report: {html_path}")
 
     print(f"Fetched {len(new_posts)} new posts for @{config.username} -> {output_path}")
     print(f"Total posts in output: {len(merged_posts)}")
-    print(f"Updated and opened HTML report -> {html_path}")
+    action = "Updated HTML report" if args.no_open else "Updated and opened HTML report"
+    print(f"{action} -> {html_path}")
     if config.ignore_cached_posts:
         print("Skipped processed-post sidecar update (strict window mode)")
     else:

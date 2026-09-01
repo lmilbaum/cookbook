@@ -35,6 +35,11 @@ def parse_args() -> argparse.Namespace:
         description="Fetch Instagram posts using a TOML config file."
     )
     parser.add_argument("--config", default="cookbook.toml", help="Path to TOML config file")
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Generate the report without opening a new browser tab.",
+    )
     return parser.parse_args()
 
 

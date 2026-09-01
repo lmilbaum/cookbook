@@ -70,6 +70,8 @@ def render_html(
                 "recipeUrls": recipe_urls,
                 "recipeNames": recipe_names,
                 "imageUrl": post.image_url,
+                "instructions": "",
+                "prerequisiteId": "",
                 "notes": "",
             }
         )
@@ -108,6 +110,14 @@ def render_html(
       .source-link {{ text-align: right; direction: rtl; }}
       .recipe-links {{ text-align: right; }}
       .notes-link {{ text-align: right; }}
+      .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
+      .recipe-instructions h3 {{ margin: 0 0 8px; font-size: 1rem; }}
+      .recipe-instructions pre {{ margin: 0; }}
+      .recipe-prerequisite {{ display: flex; align-items: center; gap: 10px; margin: 12px 0; color: #cbd1dc; text-align: right; direction: rtl; white-space: nowrap; }}
+      .recipe-prerequisite select {{ width: min(240px, 100%); min-width: 0; flex: 0 1 240px; border: 1px solid #aeb6c4; border-radius: 7px; padding: 9px 11px; background: #f3f5f8; color: #20242c; font: inherit; }}
+      .recipe-prerequisite select:focus {{ outline: 3px solid rgb(141 183 255 / 35%); border-color: #8db7ff; }}
+      .prerequisite-link {{ flex: none; color: #8db7ff; }}
+      @media (max-width: 480px) {{ .recipe-prerequisite {{ flex-wrap: wrap; white-space: normal; }} .recipe-prerequisite select {{ flex-basis: 100%; }} }}
       .grid {{
         display: grid;
         gap: 16px;
@@ -131,6 +141,7 @@ def render_html(
       .recipe-form h2 {{ margin: 0; }}
       .recipe-form label {{ display: grid; gap: 6px; color: #cbd1dc; }}
       .recipe-form input {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
+      .recipe-form select {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .recipe-form textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .form-actions {{ display: flex; justify-content: flex-end; gap: 8px; }}
       .secondary-button {{ background: #2a2f3a; color: #eceef3; }}
@@ -174,6 +185,7 @@ def render_html(
         <label>Recipe link <input id="recipe-url" type="url" placeholder="https://..." /></label>
         <label>Source link <input id="source-url" type="url" placeholder="https://..." /></label>
         <label>Image link <input id="image-url" type="text" placeholder="https://..." /></label>
+        <label>הוראות הכנה <textarea id="recipe-instructions" maxlength="10000" dir="rtl" placeholder="הקלידו כאן את הוראות ההכנה..."></textarea></label>
         <p class="save-status" id="save-status" aria-live="polite"></p>
         <div class="form-actions">
           <button class="danger-button" id="delete-recipe" type="button">Delete</button>
@@ -196,6 +208,7 @@ def render_html(
         const recipeUrlInput = document.getElementById("recipe-url");
         const sourceUrlInput = document.getElementById("source-url");
         const imageUrlInput = document.getElementById("image-url");
+        const instructionsInput = document.getElementById("recipe-instructions");
         const deleteButton = document.getElementById("delete-recipe");
         const saveStatus = document.getElementById("save-status");
         const baseIds = new Set(baseRecipes.map((recipe) => recipe.id));
@@ -234,11 +247,33 @@ def render_html(
           const recipeUrls = [...new Set([recipe.recipeUrl, ...(recipe.recipeUrls || [])].map(safeLink).filter(Boolean))];
           recipeUrls.forEach((url, index) => {{
             const nameIndex = (recipe.recipeUrls || []).indexOf(url);
-            const label = index === 0 && recipe.recipeName ? recipe.recipeName : (recipe.recipeNames || [])[nameIndex] || recipeNameFromUrl(url);
+            const label = index === 0 && !baseIds.has(recipe.id)
+              ? recipe.title
+              : index === 0 && recipe.recipeName
+                ? recipe.recipeName
+                : (recipe.recipeNames || [])[nameIndex] || recipeNameFromUrl(url);
             const target = `cookbook-recipe-${{recipe.id}}${{index ? `-${{index}}` : ""}}`;
             const recipeLink = linkRow(url, label, "", target); if (recipeLink) links.append(recipeLink);
           }});
           card.querySelector(".notes-link a").href = `notes.html?id=${{encodeURIComponent(recipe.id)}}`;
+          const instructionsBox = card.querySelector(".recipe-instructions");
+          const instructions = (recipe.instructions || "").trim();
+          instructionsBox.hidden = !instructions;
+          instructionsBox.querySelector("pre").textContent = instructions;
+          const prerequisiteSelect = card.querySelector(".recipe-prerequisite select");
+          prerequisiteSelect.replaceChildren(new Option("לא נדרש מתכון נוסף", ""));
+          grid.querySelectorAll("[data-recipe-id]").forEach((candidateCard) => {{
+            const candidate = recipeFromCard(candidateCard);
+            if (candidate.id !== recipe.id) prerequisiteSelect.add(new Option(candidate.title, candidate.id));
+          }});
+          prerequisiteSelect.value = prerequisiteSelect.querySelector(`option[value="${{CSS.escape(recipe.prerequisiteId || "")}}"]`)
+            ? recipe.prerequisiteId || ""
+            : "";
+          const prerequisiteLink = card.querySelector(".prerequisite-link");
+          prerequisiteLink.hidden = !prerequisiteSelect.value;
+          prerequisiteLink.href = prerequisiteSelect.value
+            ? `#recipe-${{encodeURIComponent(prerequisiteSelect.value)}}`
+            : "#";
           const imageBox = card.querySelector(".card-image"); imageBox.replaceChildren();
           const imageUrl = safeLink(recipe.imageUrl);
           if (imageUrl) {{
@@ -250,14 +285,15 @@ def render_html(
           card.dataset.recipe = JSON.stringify(recipe);
         }};
         const createCard = (recipe) => {{
-          const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id;
-          card.innerHTML = '<h2 class="card-title" dir="auto"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><p class="link-row notes-link"><a>הערות</a></p><div class="card-image"></div><button class="edit-recipe" type="button">Edit recipe</button>';
+          const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id; card.id = `recipe-${{encodeURIComponent(recipe.id)}}`;
+          card.innerHTML = '<h2 class="card-title" dir="auto"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a></div><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><p class="link-row notes-link"><a>הערות</a></p><div class="card-image"></div><button class="edit-recipe" type="button">Edit recipe</button>';
           updateCard(card, recipe); return card;
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
         const openEditor = (recipe, isCustom) => {{
           form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; recipeUrlInput.value = recipe.recipeUrl || "";
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
+          instructionsInput.value = recipe.instructions || "";
           formTitle.textContent = recipe.id ? "Edit recipe" : "Add recipe"; deleteButton.hidden = !isCustom; saveStatus.textContent = ""; dialog.showModal(); titleInput.focus();
         }};
         baseRecipes.forEach((baseRecipe) => {{
@@ -265,6 +301,7 @@ def render_html(
           grid.append(createCard({{ ...baseRecipe, ...override, recipeName: override.recipeName || baseRecipe.recipeName }}));
         }});
         state.custom.forEach((recipe) => grid.append(createCard(recipe)));
+        grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
         if (!grid.children.length) grid.innerHTML = "<p>No posts found.</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
         if (savedScrollPosition !== null) {{
@@ -273,10 +310,18 @@ def render_html(
           requestAnimationFrame(restoreScroll);
           window.addEventListener("load", restoreScroll, {{ once: true }});
         }}
-        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", notes: "" }}, true));
+        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", instructions: "", prerequisiteId: "", notes: "" }}, true));
         document.getElementById("cancel-recipe").addEventListener("click", () => dialog.close());
         grid.addEventListener("click", (event) => {{
           if (event.target.closest(".notes-link a")) sessionStorage.setItem(scrollStorageKey, String(window.scrollY));
+        }});
+        grid.addEventListener("change", (event) => {{
+          const select = event.target.closest(".recipe-prerequisite select"); if (!select) return;
+          const card = select.closest("[data-recipe-id]");
+          const recipe = {{ ...recipeFromCard(card), prerequisiteId: select.value }};
+          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
+          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
+          save(); updateCard(card, recipe);
         }});
         grid.addEventListener("click", (event) => {{
           const button = event.target.closest(".edit-recipe"); if (!button) return;
@@ -286,32 +331,41 @@ def render_html(
           event.preventDefault();
           const existingId = idInput.value;
           const previous = existingId ? recipeFromCard(grid.querySelector(`[data-recipe-id="${{CSS.escape(existingId)}}"]`)) : {{}};
+          const title = titleInput.value.trim();
           const recipeUrl = safeLink(recipeUrlInput.value.trim());
           const extraRecipeLinks = (previous.recipeUrls || [])
             .map((url, index) => ({{ url, name: (previous.recipeNames || [])[index] || recipeNameFromUrl(url) }}))
             .filter((link) => link.url !== previous.recipeUrl && link.url !== recipeUrl);
-          const recipeName = recipeUrl === previous.recipeUrl ? previous.recipeName || "" : recipeNameFromUrl(recipeUrl);
+          const isCustomRecipe = !existingId || !baseIds.has(existingId);
+          const recipeName = isCustomRecipe
+            ? title
+            : recipeUrl === previous.recipeUrl ? previous.recipeName || "" : recipeNameFromUrl(recipeUrl);
           const recipe = {{
             ...previous,
             id: existingId || `custom-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`,
-            title: titleInput.value.trim(),
+            title,
             recipeUrl,
             recipeName,
             recipeUrls: [recipeUrl, ...extraRecipeLinks.map((link) => link.url)].filter(Boolean),
             recipeNames: [recipeName, ...extraRecipeLinks.map((link) => link.name)].filter(Boolean),
             sourceUrl: safeLink(sourceUrlInput.value.trim()),
             imageUrl: safeLink(imageUrlInput.value.trim()),
+            instructions: instructionsInput.value.trim(),
+            prerequisiteId: previous.prerequisiteId || "",
             notes: previous.notes || "",
           }};
           if (!recipe.title) return;
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
           save(); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.prepend(createCard(recipe));
+          grid.querySelectorAll("[data-recipe-id]").forEach((recipeCard) => updateCard(recipeCard, recipeFromCard(recipeCard)));
           saveStatus.textContent = "Saved in this browser."; setTimeout(() => dialog.close(), 350);
         }});
         deleteButton.addEventListener("click", () => {{
           const id = idInput.value; if (!id || baseIds.has(id)) return;
-          state.custom = state.custom.filter((recipe) => recipe.id !== id); save(); grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove(); dialog.close();
+          state.custom = state.custom.filter((recipe) => recipe.id !== id); save(); grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
+          grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
+          dialog.close();
         }});
       }})();
     </script>
@@ -427,7 +481,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
       h2 {{ margin: 0 0 14px; }}
       .shopping-form {{ display: flex; gap: 8px; margin-bottom: 14px; }}
       input[type="text"] {{ min-width: 0; flex: 1; border: 1px solid #b9aa96; border-radius: 6px; padding: 10px 12px; font: inherit; }}
-      .shopping-form button, .clear-purchased {{ border: 0; border-radius: 6px; padding: 10px 14px; background: #24211d; color: #fffaf2; font: inherit; cursor: pointer; }}
+      .shopping-form button, .clear-purchased, .export-button {{ border: 0; border-radius: 6px; padding: 10px 14px; background: #24211d; color: #fffaf2; font: inherit; cursor: pointer; }}
       .shopping-items {{ display: grid; gap: 6px; margin-bottom: 14px; }}
       .shopping-item {{ display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #dfd4c5; }}
       .shopping-item label {{ flex: 1; overflow-wrap: anywhere; }}
@@ -435,6 +489,9 @@ def render_shopping_list_html(favicon_href: str) -> str:
       .remove-item {{ border: 0; background: transparent; color: #9a3d35; cursor: pointer; }}
       .empty-shopping-list {{ color: #756b60; }}
       .list-footer {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; }}
+      .export-actions {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }}
+      .export-button:disabled {{ cursor: not-allowed; opacity: 0.5; }}
+      .export-status {{ min-height: 1.4em; margin: 8px 0 0; color: #5f564c; direction: rtl; text-align: right; }}
       @media (max-width: 480px) {{ .shopping-form {{ flex-wrap: wrap; }} .shopping-form button {{ flex: 1; }} }}
     </style>
   </head>
@@ -454,6 +511,10 @@ def render_shopping_list_html(favicon_href: str) -> str:
           <span id="shopping-count">0 items</span>
           <button class="clear-purchased" id="clear-purchased" type="button">Clear purchased</button>
         </div>
+        <div class="export-actions" aria-label="Export shopping list">
+          <button class="export-button" id="send-to-trello" type="button" dir="rtl"><span>ייצוא ל־</span><bdi>Trello</bdi></button>
+        </div>
+        <p class="export-status" id="export-status" role="status" aria-live="polite"></p>
       </section>
     </main>
     <script>
@@ -465,8 +526,43 @@ def render_shopping_list_html(favicon_href: str) -> str:
         const emptyElement = document.getElementById("empty-shopping-list");
         const countElement = document.getElementById("shopping-count");
         const clearButton = document.getElementById("clear-purchased");
+        const trelloButton = document.getElementById("send-to-trello");
+        const exportStatus = document.getElementById("export-status");
+        const setBidiStatus = (prefix, englishText = "", suffix = "") => {{
+          exportStatus.replaceChildren(prefix);
+          if (englishText) {{
+            const isolatedText = document.createElement("bdi");
+            isolatedText.textContent = englishText;
+            exportStatus.append(isolatedText);
+          }}
+          if (suffix) exportStatus.append(suffix);
+        }};
         let items = JSON.parse(localStorage.getItem(storageKey) || "[]");
-        const save = () => localStorage.setItem(storageKey, JSON.stringify(items));
+        const save = () => {{
+          localStorage.setItem(storageKey, JSON.stringify(items));
+          if (location.protocol.startsWith("http")) fetch("/api/shopping-list", {{
+            method: "PUT",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify(items),
+          }}).catch(() => {{ exportStatus.textContent = "השמירה לקובץ נכשלה; הרשימה נשמרה בדפדפן בלבד."; }});
+        }};
+        const loadPersistedItems = async () => {{
+          if (!location.protocol.startsWith("http")) return;
+          try {{
+            const response = await fetch("/api/shopping-list");
+            if (!response.ok) throw new Error("Unable to load shopping list");
+            const persistedItems = await response.json();
+            if (Array.isArray(persistedItems)) {{
+              items = persistedItems;
+              localStorage.setItem(storageKey, JSON.stringify(items));
+              render();
+            }} else if (items.length) {{
+              save();
+            }}
+          }} catch (error) {{
+            exportStatus.textContent = "לא ניתן לטעון את הקובץ; מוצגת הרשימה השמורה בדפדפן.";
+          }}
+        }};
         const render = () => {{
           itemsElement.replaceChildren();
           items.forEach((item) => {{
@@ -489,6 +585,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
           }});
           emptyElement.hidden = items.length > 0;
           countElement.textContent = `${{items.length}} item${{items.length === 1 ? "" : "s"}}`;
+          trelloButton.disabled = items.length === 0;
         }};
         form.addEventListener("submit", (event) => {{
           event.preventDefault();
@@ -501,7 +598,35 @@ def render_shopping_list_html(favicon_href: str) -> str:
           input.focus();
         }});
         clearButton.addEventListener("click", () => {{ items = items.filter((item) => !item.done); save(); render(); }});
+        trelloButton.addEventListener("click", async () => {{
+          trelloButton.disabled = true;
+          setBidiStatus("מייצא את רשימת הקניות ל־", "Trello", "…");
+          try {{
+            const response = await fetch("/api/trello/cards", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify(items),
+            }});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "Trello export failed");
+            const statusText = result.action === "updated"
+              ? "הכרטיס הקיים עודכן בבורד "
+              : "כרטיס חדש נוצר בבורד ";
+            setBidiStatus(statusText, "My To Do List", ". ");
+            const cardLink = document.createElement("a");
+            cardLink.href = result.url;
+            cardLink.target = "_blank";
+            cardLink.rel = "noopener noreferrer";
+            cardLink.textContent = "פתיחת הכרטיס";
+            exportStatus.append(cardLink);
+          }} catch (error) {{
+            setBidiStatus("לא ניתן היה לייצא את הרשימה ל־", "Trello", ".");
+          }} finally {{
+            trelloButton.disabled = items.length === 0;
+          }}
+        }});
         render();
+        loadPersistedItems();
       }})();
     </script>
   </body>
