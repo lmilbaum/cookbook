@@ -107,6 +107,21 @@ def render_html(
       .link-row {{
         margin: 0 0 10px;
       }}
+      .shopping-list-link {{
+        position: fixed;
+        right: max(16px, env(safe-area-inset-right));
+        bottom: max(16px, env(safe-area-inset-bottom));
+        z-index: 10;
+        border-radius: 999px;
+        padding: 12px 18px;
+        background: #8db7ff;
+        color: #101218;
+        font-weight: 700;
+        text-decoration: none;
+        box-shadow: 0 6px 22px rgb(0 0 0 / 40%);
+      }}
+      .shopping-list-link:hover {{ background: #a8c8ff; }}
+      .shopping-list-link:focus-visible {{ outline: 3px solid #eceef3; outline-offset: 3px; }}
       .source-link {{ text-align: right; direction: rtl; }}
       .recipe-links {{ text-align: right; }}
       .notes-link {{ text-align: right; }}
@@ -169,12 +184,12 @@ def render_html(
     </style>
   </head>
   <body>
+    <a class="shopping-list-link" href="shopping_list.html" dir="rtl" aria-label="פתיחת רשימת הקניות">רשימת הקניות</a>
     <main>
       <div class="page-header">
         <h1>ספר המתכונים שלי</h1>
         <button id="add-recipe" type="button">הוסף מתכון</button>
       </div>
-      <p class="link-row"><a href="shopping_list.html">רשימת הקניות</a></p>
       <section class=\"grid\" id=\"recipe-grid\"></section>
     </main>
     <dialog id="recipe-dialog">
@@ -234,7 +249,17 @@ def render_html(
         const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
         const safeLink = (value) => {{
           if (!value) return "";
-          try {{ const url = new URL(value, window.location.href); return ["http:", "https:", "file:"].includes(url.protocol) ? url.href : ""; }}
+          try {{
+            const url = new URL(value, window.location.href);
+            if (url.protocol === "file:" && window.location.protocol.startsWith("http")) {{
+              const localAssetRoot = ["/lizapanelim_posts_assets/", "/recipes/"]
+                .find((root) => url.pathname.includes(root));
+              return localAssetRoot
+                ? `${{window.location.origin}}${{url.pathname.slice(url.pathname.lastIndexOf(localAssetRoot))}}`
+                : "";
+            }}
+            return ["http:", "https:", "file:"].includes(url.protocol) ? url.href : "";
+          }}
           catch {{ return ""; }}
         }};
         const linkRow = (url, label, className = "", targetName = "_blank") => {{

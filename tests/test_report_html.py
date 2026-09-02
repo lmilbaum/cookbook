@@ -215,6 +215,20 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('id="add-recipe"', document)
         self.assertIn('id="recipe-dialog"', document)
 
+    def test_shopping_list_link_stays_available_while_scrolling(self) -> None:
+        document = render_html([make_post()], "user", "favicon.svg")
+
+        self.assertIn('class="shopping-list-link" href="shopping_list.html"', document)
+        self.assertIn(".shopping-list-link {", document)
+        self.assertIn("position: fixed;", document)
+
+    def test_file_image_links_are_mapped_to_http_assets_after_migration(self) -> None:
+        document = render_html([make_post()], "user", "favicon.svg")
+
+        self.assertIn('url.protocol === "file:" && window.location.protocol.startsWith("http")', document)
+        self.assertIn('["/lizapanelim_posts_assets/", "/recipes/"]', document)
+        self.assertIn("`${window.location.origin}${url.pathname.slice", document)
+
     def test_shopping_list_can_be_sent_to_trello(self) -> None:
         document = render_shopping_list_html("favicon.svg")
 
