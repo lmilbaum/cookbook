@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import threading
+import time
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +17,63 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
+
+from .models import PostItem
+
+
+def _render_reports(data_file: Path) -> None:
+    """Rebuild static report pages from the existing post data."""
+
+    from . import report_html  # Imported here so development reloads can refresh it.
+
+    report_html = importlib.reload(report_html)
+    payload = json.loads(data_file.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError(f"Post data must contain a list: {data_file}")
+    posts = [PostItem(**item) for item in payload]
+    favicon_path = report_html.write_favicon(data_file)
+    html_path = data_file.with_suffix(".html")
+    html_path.write_text(
+        report_html.render_html(
+            posts,
+            data_file.stem.removesuffix("_posts"),
+            favicon_path.name,
+        ),
+        encoding="utf-8",
+    )
+    html_path.with_name("shopping_list.html").write_text(
+        report_html.render_shopping_list_html(favicon_path.name), encoding="utf-8"
+    )
+    html_path.with_name("notes.html").write_text(
+        report_html.render_notes_html(posts, favicon_path.name), encoding="utf-8"
+    )
+
+
+def _watch_and_render(data_file: Path) -> None:
+    """Rebuild report pages whenever their renderer or source data changes."""
+
+    watched_paths = (Path(__file__).with_name("report_html.py"), data_file)
+    modified = {
+        path: path.stat().st_mtime_ns if path.exists() else 0 for path in watched_paths
+    }
+    try:
+        _render_reports(data_file)
+        print("Reload mode: generated report pages.")
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        print(f"Reload mode: unable to generate report pages: {error}")
+    while True:
+        time.sleep(0.5)
+        current = {
+            path: path.stat().st_mtime_ns if path.exists() else 0 for path in watched_paths
+        }
+        if current == modified:
+            continue
+        modified = current
+        try:
+            _render_reports(data_file)
+            print("Reload mode: updated report pages. Refresh the browser to view changes.")
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+            print(f"Reload mode: unable to update report pages: {error}")
 
 
 def _valid_items(value: Any) -> bool:
@@ -255,10 +314,22 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--directory", type=Path, default=Path.cwd())
     parser.add_argument("--no-open", action="store_true")
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Automatically rebuild report pages when renderer code or post data changes.",
+    )
     args = parser.parse_args()
     root = args.directory.resolve()
     load_dotenv(root / ".env")
     data_path = root / "shopping_list.json"
+    report_data_path = root / "lizapanelim_posts.json"
+    if args.reload:
+        threading.Thread(
+            target=_watch_and_render,
+            args=(report_data_path,),
+            daemon=True,
+        ).start()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(root, data_path))
     url = f"http://{args.host}:{args.port}/lizapanelim_posts.html"
     print(f"Cookbook available at {url}")

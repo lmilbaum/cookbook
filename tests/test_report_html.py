@@ -100,6 +100,7 @@ class RenderHtmlTests(unittest.TestCase):
                 "recipeUrls": [post.recipe_url, *post.recipe_urls],
                 "recipeNames": ["primary", "secondary"],
                 "imageUrl": post.image_url,
+                "ingredients": [],
                 "instructions": "",
                 "prerequisiteId": "",
                 "notes": "",
@@ -122,6 +123,8 @@ class RenderHtmlTests(unittest.TestCase):
             'id="recipe-url"',
             'id="source-url"',
             'id="image-url"',
+            'id="ingredients-editor-body"',
+            'id="add-ingredient"',
             'id="recipe-instructions"',
             'id="delete-recipe"',
             'class="edit-recipe"',
@@ -131,7 +134,17 @@ class RenderHtmlTests(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, document)
 
+        self.assertIn('ingredients: [...ingredientsEditorBody.rows].map', document)
         self.assertIn('instructions: instructionsInput.value.trim()', document)
+        self.assertIn('<table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th>', document)
+        self.assertIn('const normalizeIngredients = (value)', document)
+        self.assertIn('const addIngredientRow = (ingredient = {})', document)
+        self.assertIn('cell.textContent = value', document)
+        self.assertIn('ingredientsBox.hidden = false', document)
+        self.assertIn(': [{ name: "", varieties: "", amount: "" }]', document)
+        self.assertIn(r'.split(/\r?\n/)', document)
+        self.assertIn('<p class="link-row notes-link"><a>הערות</a></p><button class="edit-recipe" type="button">עריכת המתכון</button>', document)
+        self.assertIn('.edit-recipe { display: block; margin: 0 0 10px auto; padding: 0; background: transparent; color: #8db7ff;', document)
         self.assertIn('<h3>הוראות הכנה</h3><pre></pre>', document)
         self.assertIn('<span>דרוש הכנה של</span><select aria-label="דרוש הכנה של">', document)
         self.assertIn('class="prerequisite-link">למתכון</a>', document)

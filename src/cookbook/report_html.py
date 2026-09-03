@@ -70,6 +70,7 @@ def render_html(
                 "recipeUrls": recipe_urls,
                 "recipeNames": recipe_names,
                 "imageUrl": post.image_url,
+                "ingredients": [],
                 "instructions": "",
                 "prerequisiteId": "",
                 "notes": "",
@@ -128,6 +129,12 @@ def render_html(
       .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
       .recipe-instructions h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-instructions pre {{ margin: 0; }}
+      .recipe-ingredients {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
+      .recipe-ingredients h3 {{ margin: 0 0 8px; font-size: 1rem; }}
+      .ingredients-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+      .ingredients-table th, .ingredients-table td {{ padding: 8px 10px; border: 1px solid #3a414f; text-align: right; overflow-wrap: anywhere; }}
+      .ingredients-table th {{ background: #242936; color: #eceef3; }}
+      .ingredients-table td {{ color: #cbd1dc; }}
       .recipe-prerequisite {{ display: flex; align-items: center; gap: 10px; margin: 12px 0; color: #cbd1dc; text-align: right; direction: rtl; white-space: nowrap; }}
       .recipe-prerequisite select {{ width: min(240px, 100%); min-width: 0; flex: 0 1 240px; border: 1px solid #aeb6c4; border-radius: 7px; padding: 9px 11px; background: #f3f5f8; color: #20242c; font: inherit; }}
       .recipe-prerequisite select:focus {{ outline: 3px solid rgb(141 183 255 / 35%); border-color: #8db7ff; }}
@@ -149,7 +156,9 @@ def render_html(
         line-height: 1.25;
       }}
       button {{ border: 0; border-radius: 7px; padding: 9px 13px; background: #8db7ff; color: #101218; font: inherit; font-weight: 600; cursor: pointer; }}
-      .edit-recipe {{ margin-top: 4px; background: #2a2f3a; color: #eceef3; }}
+      .edit-recipe {{ display: block; margin: 0 0 10px auto; padding: 0; background: transparent; color: #8db7ff; font-weight: 400; text-decoration: underline; }}
+      .edit-recipe:hover {{ color: #a8c8ff; }}
+      .edit-recipe:focus-visible {{ outline: 2px solid #8db7ff; outline-offset: 3px; }}
       dialog {{ width: min(520px, calc(100% - 32px)); border: 1px solid #3a414f; border-radius: 12px; padding: 0; background: #171a21; color: #eceef3; }}
       dialog::backdrop {{ background: rgba(0, 0, 0, 0.72); }}
       .recipe-form {{ display: grid; gap: 14px; padding: 22px; }}
@@ -158,6 +167,15 @@ def render_html(
       .recipe-form input {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .recipe-form select {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .recipe-form textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
+      .ingredients-editor {{ display: grid; gap: 8px; }}
+      .ingredients-editor > span {{ color: #cbd1dc; }}
+      .ingredients-editor-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; direction: rtl; }}
+      .ingredients-editor-table th, .ingredients-editor-table td {{ padding: 5px; border: 1px solid #3a414f; text-align: right; }}
+      .ingredients-editor-table th {{ color: #cbd1dc; font-weight: 600; }}
+      .ingredients-editor-table th:last-child, .ingredients-editor-table td:last-child {{ width: 42px; }}
+      .ingredients-editor-table input {{ min-width: 0; padding: 8px; }}
+      .remove-ingredient {{ padding: 7px 9px; background: #7d2c32; color: #fff; }}
+      .add-ingredient {{ justify-self: start; background: #2a2f3a; color: #eceef3; }}
       .form-actions {{ display: flex; justify-content: flex-end; gap: 8px; }}
       .secondary-button {{ background: #2a2f3a; color: #eceef3; }}
       .danger-button {{ margin-right: auto; background: #7d2c32; color: #fff; }}
@@ -200,6 +218,14 @@ def render_html(
         <label>Recipe link <input id="recipe-url" type="url" placeholder="https://..." /></label>
         <label>Source link <input id="source-url" type="url" placeholder="https://..." /></label>
         <label>Image link <input id="image-url" type="text" placeholder="https://..." /></label>
+        <div class="ingredients-editor">
+          <span>מצרכים</span>
+          <table class="ingredients-editor-table">
+            <thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th><th scope="col"><span class="visually-hidden">פעולות</span></th></tr></thead>
+            <tbody id="ingredients-editor-body"></tbody>
+          </table>
+          <button class="add-ingredient" id="add-ingredient" type="button">הוספת מצרך</button>
+        </div>
         <label>הוראות הכנה <textarea id="recipe-instructions" maxlength="10000" dir="rtl" placeholder="הקלידו כאן את הוראות ההכנה..."></textarea></label>
         <p class="save-status" id="save-status" aria-live="polite"></p>
         <div class="form-actions">
@@ -223,6 +249,7 @@ def render_html(
         const recipeUrlInput = document.getElementById("recipe-url");
         const sourceUrlInput = document.getElementById("source-url");
         const imageUrlInput = document.getElementById("image-url");
+        const ingredientsEditorBody = document.getElementById("ingredients-editor-body");
         const instructionsInput = document.getElementById("recipe-instructions");
         const deleteButton = document.getElementById("delete-recipe");
         const saveStatus = document.getElementById("save-status");
@@ -274,6 +301,29 @@ def render_html(
             return segment ? decodeURIComponent(segment).replace(/[-_]+/g, " ").replace(/\\s+/g, " ").trim() : "Recipe";
           }} catch {{ return "Recipe"; }}
         }};
+        const normalizeIngredients = (value) => {{
+          if (Array.isArray(value)) return value.map((item) => ({{
+            name: String(item?.name || "").trim(),
+            varieties: String(item?.varieties || "").trim(),
+            amount: String(item?.amount || "").trim(),
+          }})).filter((item) => item.name || item.varieties || item.amount);
+          return String(value || "").split(/\\r?\\n/).map((line) => {{
+            const [name = "", varieties = "", ...amountParts] = line.split("|").map((part) => part.trim());
+            return {{ name, varieties, amount: amountParts.join(" | ") }};
+          }}).filter((item) => item.name || item.varieties || item.amount);
+        }};
+        const addIngredientRow = (ingredient = {{}}) => {{
+          const row = document.createElement("tr");
+          ["name", "varieties", "amount"].forEach((field) => {{
+            const cell = document.createElement("td");
+            const input = document.createElement("input"); input.type = "text"; input.maxLength = 120; input.dataset.field = field; input.value = ingredient[field] || "";
+            cell.append(input); row.append(cell);
+          }});
+          const actionCell = document.createElement("td");
+          const remove = document.createElement("button"); remove.type = "button"; remove.className = "remove-ingredient"; remove.textContent = "−"; remove.setAttribute("aria-label", "מחיקת מצרך");
+          remove.addEventListener("click", () => {{ row.remove(); if (!ingredientsEditorBody.rows.length) addIngredientRow(); }});
+          actionCell.append(remove); row.append(actionCell); ingredientsEditorBody.append(row);
+        }};
         const updateCard = (card, recipe) => {{
           card.querySelector(".card-title").textContent = recipe.title;
           const source = card.querySelector(".source-link");
@@ -293,6 +343,20 @@ def render_html(
             const recipeLink = linkRow(url, label, "", target); if (recipeLink) links.append(recipeLink);
           }});
           card.querySelector(".notes-link a").href = `notes.html?id=${{encodeURIComponent(recipe.id)}}`;
+          const ingredientsBox = card.querySelector(".recipe-ingredients");
+          const ingredients = normalizeIngredients(recipe.ingredients);
+          ingredientsBox.hidden = false;
+          const ingredientsBody = ingredientsBox.querySelector("tbody");
+          const displayedIngredients = ingredients.length
+            ? ingredients
+            : [{{ name: "", varieties: "", amount: "" }}];
+          ingredientsBody.replaceChildren(...displayedIngredients.map((ingredient) => {{
+            const row = document.createElement("tr");
+            [ingredient.name, ingredient.varieties, ingredient.amount].forEach((value) => {{
+              const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+            }});
+            return row;
+          }}));
           const instructionsBox = card.querySelector(".recipe-instructions");
           const instructions = (recipe.instructions || "").trim();
           instructionsBox.hidden = !instructions;
@@ -323,13 +387,16 @@ def render_html(
         }};
         const createCard = (recipe) => {{
           const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id; card.id = `recipe-${{encodeURIComponent(recipe.id)}}`;
-          card.innerHTML = '<h2 class="card-title" dir="auto"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a></div><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><p class="link-row notes-link"><a>הערות</a></p><div class="card-image"></div><button class="edit-recipe" type="button">Edit recipe</button>';
+          card.innerHTML = '<h2 class="card-title" dir="auto"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a></div><section class="recipe-ingredients"><h3>מצרכים</h3><table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th></tr></thead><tbody></tbody></table></section><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><p class="link-row notes-link"><a>הערות</a></p><button class="edit-recipe" type="button">עריכת המתכון</button><div class="card-image"></div>';
           updateCard(card, recipe); return card;
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
         const openEditor = (recipe, isCustom) => {{
           form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; recipeUrlInput.value = recipe.recipeUrl || "";
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
+          ingredientsEditorBody.replaceChildren();
+          const ingredients = normalizeIngredients(recipe.ingredients);
+          (ingredients.length ? ingredients : [{{}}]).forEach(addIngredientRow);
           instructionsInput.value = recipe.instructions || "";
           formTitle.textContent = recipe.id ? "Edit recipe" : "Add recipe"; deleteButton.hidden = !isCustom; saveStatus.textContent = ""; dialog.showModal(); titleInput.focus();
         }};
@@ -345,7 +412,8 @@ def render_html(
           requestAnimationFrame(restoreScroll);
           window.addEventListener("load", restoreScroll, {{ once: true }});
         }}
-        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", instructions: "", prerequisiteId: "", notes: "" }}, true));
+        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", prerequisiteId: "", notes: "" }}, true));
+        document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
         document.getElementById("cancel-recipe").addEventListener("click", () => dialog.close());
         grid.addEventListener("click", (event) => {{
           if (event.target.closest(".notes-link a")) sessionStorage.setItem(scrollStorageKey, String(window.scrollY));
@@ -385,6 +453,9 @@ def render_html(
             recipeNames: [recipeName, ...extraRecipeLinks.map((link) => link.name)].filter(Boolean),
             sourceUrl: safeLink(sourceUrlInput.value.trim()),
             imageUrl: safeLink(imageUrlInput.value.trim()),
+            ingredients: [...ingredientsEditorBody.rows].map((row) => Object.fromEntries(
+              [...row.querySelectorAll("input[data-field]")].map((input) => [input.dataset.field, input.value.trim()])
+            )).filter((item) => item.name || item.varieties || item.amount),
             instructions: instructionsInput.value.trim(),
             prerequisiteId: previous.prerequisiteId || "",
             notes: previous.notes || "",
