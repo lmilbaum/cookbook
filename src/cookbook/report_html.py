@@ -105,6 +105,8 @@ def render_html(
       }}
       .page-header {{ display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }}
       .page-header h1 {{ margin: 0; text-align: right; direction: rtl; }}
+      .back-to-cookbook {{ display: none; margin-bottom: 14px; text-align: right; direction: rtl; }}
+      .recipe-view .back-to-cookbook {{ display: block; }}
       .link-row {{
         margin: 0 0 10px;
       }}
@@ -123,9 +125,34 @@ def render_html(
       }}
       .shopping-list-link:hover {{ background: #a8c8ff; }}
       .shopping-list-link:focus-visible {{ outline: 3px solid #eceef3; outline-offset: 3px; }}
-      .source-link {{ text-align: right; direction: rtl; }}
-      .recipe-links {{ text-align: right; }}
-      .notes-link {{ text-align: right; }}
+      .card-header {{ display: grid; justify-items: end; gap: 10px; margin-bottom: 14px; }}
+      .card-meta {{ display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 12px; width: fit-content; max-width: 100%; border: 1px solid #303644; border-radius: 9px; padding: 10px 12px; background: #12151b; direction: rtl; text-align: right; }}
+      .meta-label {{ color: #929baa; font-size: .82rem; font-weight: 600; line-height: 1.45; }}
+      .source-link {{ min-width: 0; text-align: right; direction: rtl; }}
+      .recipe-links {{ display: grid; gap: 5px; min-width: 0; text-align: right; }}
+      .card-meta .link-row {{ margin: 0; overflow-wrap: anywhere; }}
+      .card-meta a {{ text-underline-offset: 3px; }}
+      .card-title a {{ color: inherit; text-decoration: none; }}
+      .card-title a:hover {{ color: #a8c8ff; }}
+      .cookbook-view .card-meta,
+      .cookbook-view .recipe-prerequisite,
+      .cookbook-view .recipe-ingredients,
+      .cookbook-view .recipe-instructions,
+      .cookbook-view .recipe-notes,
+      .cookbook-view .edit-recipe {{ display: none; }}
+      .cookbook-view .card-header {{ margin-bottom: 12px; }}
+      .cookbook-view .card-image img {{ margin: 0; }}
+      .recipe-view .card-image {{ display: flex; justify-content: flex-end; }}
+      .recipe-view .card-image a {{ width: min(220px, 100%); }}
+      .recipe-view .card-image img {{ max-height: 220px; margin: 0; }}
+      .recipe-view .edit-recipe {{ display: none; }}
+      .recipe-view .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; direction: rtl; text-align: right; }}
+      .recipe-view .recipe-form h2 {{ font-size: 1.05rem; }}
+      .recipe-view .recipe-form .secondary-button {{ display: none; }}
+      .recipe-notes {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
+      .recipe-notes h3 {{ margin: 0 0 8px; font-size: 1rem; }}
+      .recipe-notes textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #171a21; color: #eceef3; font: inherit; }}
+      .recipe-notes-status {{ min-height: 1.25em; margin: 6px 0 0; color: #92d3a2; font-size: .85rem; }}
       .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
       .recipe-instructions h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-instructions pre {{ margin: 0; }}
@@ -139,7 +166,7 @@ def render_html(
       .recipe-prerequisite select {{ width: min(240px, 100%); min-width: 0; flex: 0 1 240px; border: 1px solid #aeb6c4; border-radius: 7px; padding: 9px 11px; background: #f3f5f8; color: #20242c; font: inherit; }}
       .recipe-prerequisite select:focus {{ outline: 3px solid rgb(141 183 255 / 35%); border-color: #8db7ff; }}
       .prerequisite-link {{ flex: none; color: #8db7ff; }}
-      @media (max-width: 480px) {{ .recipe-prerequisite {{ flex-wrap: wrap; white-space: normal; }} .recipe-prerequisite select {{ flex-basis: 100%; }} }}
+      @media (max-width: 480px) {{ .card-meta {{ width: auto; grid-template-columns: 1fr; gap: 4px; }} .meta-label:not(:first-child) {{ margin-top: 5px; }} .recipe-prerequisite {{ flex-wrap: wrap; white-space: normal; }} .recipe-prerequisite select {{ flex-basis: 100%; }} }}
       .grid {{
         display: grid;
         gap: 16px;
@@ -151,9 +178,10 @@ def render_html(
         padding: 16px;
       }}
       .card-title {{
-        margin: 0 0 10px;
+        margin: 0;
         font-size: 1.2rem;
         line-height: 1.25;
+        text-align: right;
       }}
       button {{ border: 0; border-radius: 7px; padding: 9px 13px; background: #8db7ff; color: #101218; font: inherit; font-weight: 600; cursor: pointer; }}
       .edit-recipe {{ display: block; margin: 0 0 10px auto; padding: 0; background: transparent; color: #8db7ff; font-weight: 400; text-decoration: underline; }}
@@ -208,6 +236,7 @@ def render_html(
         <h1>ספר המתכונים שלי</h1>
         <button id="add-recipe" type="button">הוסף מתכון</button>
       </div>
+      <a class="back-to-cookbook" href="lizapanelim_posts.html">חזרה לכל המתכונים</a>
       <section class=\"grid\" id=\"recipe-grid\"></section>
     </main>
     <dialog id="recipe-dialog">
@@ -253,6 +282,8 @@ def render_html(
         const instructionsInput = document.getElementById("recipe-instructions");
         const deleteButton = document.getElementById("delete-recipe");
         const saveStatus = document.getElementById("save-status");
+        const selectedRecipeId = new URLSearchParams(window.location.search).get("recipe");
+        document.body.classList.add(selectedRecipeId ? "recipe-view" : "cookbook-view");
         const baseIds = new Set(baseRecipes.map((recipe) => recipe.id));
         let state;
         try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
@@ -325,13 +356,17 @@ def render_html(
           actionCell.append(remove); row.append(actionCell); ingredientsEditorBody.append(row);
         }};
         const updateCard = (card, recipe) => {{
-          card.querySelector(".card-title").textContent = recipe.title;
+          card.querySelector(".recipe-detail-link").textContent = recipe.title;
+          const detailUrl = `lizapanelim_posts.html?recipe=${{encodeURIComponent(recipe.id)}}`;
+          card.querySelector(".recipe-detail-link").href = detailUrl;
           const source = card.querySelector(".source-link");
           const newSource = linkRow(safeLink(recipe.sourceUrl), "אינסטגרם", "source-link") || document.createElement("p");
           newSource.className ||= "link-row source-link"; newSource.hidden = !recipe.sourceUrl;
           source.replaceWith(newSource);
+          newSource.previousElementSibling.hidden = newSource.hidden;
           const links = card.querySelector(".recipe-links"); links.replaceChildren();
           const recipeUrls = [...new Set([recipe.recipeUrl, ...(recipe.recipeUrls || [])].map(safeLink).filter(Boolean))];
+          links.previousElementSibling.hidden = !recipeUrls.length;
           recipeUrls.forEach((url, index) => {{
             const nameIndex = (recipe.recipeUrls || []).indexOf(url);
             const label = index === 0 && !baseIds.has(recipe.id)
@@ -342,7 +377,8 @@ def render_html(
             const target = `cookbook-recipe-${{recipe.id}}${{index ? `-${{index}}` : ""}}`;
             const recipeLink = linkRow(url, label, "", target); if (recipeLink) links.append(recipeLink);
           }});
-          card.querySelector(".notes-link a").href = `notes.html?id=${{encodeURIComponent(recipe.id)}}`;
+          card.querySelector(".card-meta").hidden = newSource.hidden && !recipeUrls.length;
+          card.querySelector(".recipe-notes textarea").value = recipe.notes || "";
           const ingredientsBox = card.querySelector(".recipe-ingredients");
           const ingredients = normalizeIngredients(recipe.ingredients);
           ingredientsBox.hidden = false;
@@ -373,37 +409,45 @@ def render_html(
           const prerequisiteLink = card.querySelector(".prerequisite-link");
           prerequisiteLink.hidden = !prerequisiteSelect.value;
           prerequisiteLink.href = prerequisiteSelect.value
-            ? `#recipe-${{encodeURIComponent(prerequisiteSelect.value)}}`
+            ? `lizapanelim_posts.html?recipe=${{encodeURIComponent(prerequisiteSelect.value)}}`
             : "#";
           const imageBox = card.querySelector(".card-image"); imageBox.replaceChildren();
           const imageUrl = safeLink(recipe.imageUrl);
           if (imageUrl) {{
             const image = document.createElement("img"); image.src = imageUrl; image.alt = recipe.title; image.loading = "lazy";
-            const sourceUrl = safeLink(recipe.sourceUrl);
-            if (sourceUrl) {{ const imageLink = document.createElement("a"); imageLink.href = sourceUrl; imageLink.target = "_blank"; imageLink.rel = "noreferrer"; imageLink.append(image); imageBox.append(imageLink); }}
-            else imageBox.append(image);
+            const imageLink = document.createElement("a"); imageLink.href = detailUrl; imageLink.setAttribute("aria-label", `פרטי המתכון: ${{recipe.title}}`); imageLink.append(image); imageBox.append(imageLink);
           }}
           card.dataset.recipe = JSON.stringify(recipe);
         }};
         const createCard = (recipe) => {{
           const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id; card.id = `recipe-${{encodeURIComponent(recipe.id)}}`;
-          card.innerHTML = '<h2 class="card-title" dir="auto"></h2><p class="link-row source-link"></p><div class="recipe-links"></div><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a></div><section class="recipe-ingredients"><h3>מצרכים</h3><table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th></tr></thead><tbody></tbody></table></section><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><p class="link-row notes-link"><a>הערות</a></p><button class="edit-recipe" type="button">עריכת המתכון</button><div class="card-image"></div>';
+          card.innerHTML = '<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2><div class="card-meta" aria-label="קישורים למתכון"><span class="meta-label">מקור</span><p class="link-row source-link"></p><span class="meta-label">מתכונים</span><div class="recipe-links"></div></div></header><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a></div><section class="recipe-ingredients"><h3>מצרכים</h3><table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th></tr></thead><tbody></tbody></table></section><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><section class="recipe-notes"><h3>הערות</h3><textarea aria-label="הערות למתכון"></textarea><p class="recipe-notes-status" aria-live="polite"></p></section><button class="edit-recipe" type="button">עריכת המתכון</button><div class="card-image"></div>';
           updateCard(card, recipe); return card;
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
-        const openEditor = (recipe, isCustom) => {{
+        const openEditor = (recipe, isCustom, inline = false) => {{
           form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; recipeUrlInput.value = recipe.recipeUrl || "";
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
           ingredientsEditorBody.replaceChildren();
           const ingredients = normalizeIngredients(recipe.ingredients);
           (ingredients.length ? ingredients : [{{}}]).forEach(addIngredientRow);
           instructionsInput.value = recipe.instructions || "";
-          formTitle.textContent = recipe.id ? "Edit recipe" : "Add recipe"; deleteButton.hidden = !isCustom; saveStatus.textContent = ""; dialog.showModal(); titleInput.focus();
+          formTitle.textContent = recipe.id ? "עריכת המתכון" : "הוספת מתכון"; deleteButton.hidden = !isCustom; saveStatus.textContent = "";
+          if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
         const recipesById = new Map(allRecipes().map((recipe) => [recipe.id, recipe]));
         state.order.forEach((id) => grid.append(createCard(recipesById.get(id))));
         save();
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
+        if (selectedRecipeId) {{
+          grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{ card.hidden = card.dataset.recipeId !== selectedRecipeId; }});
+          document.getElementById("add-recipe").hidden = true;
+          const selectedCard = grid.querySelector(`[data-recipe-id="${{CSS.escape(selectedRecipeId)}}"]`);
+          if (selectedCard) {{
+            selectedCard.append(form);
+            openEditor(recipeFromCard(selectedCard), !baseIds.has(selectedRecipeId), true);
+          }}
+        }}
         if (!grid.children.length) grid.innerHTML = "<p>No posts found.</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
         if (savedScrollPosition !== null) {{
@@ -415,8 +459,14 @@ def render_html(
         document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", prerequisiteId: "", notes: "" }}, true));
         document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
         document.getElementById("cancel-recipe").addEventListener("click", () => dialog.close());
-        grid.addEventListener("click", (event) => {{
-          if (event.target.closest(".notes-link a")) sessionStorage.setItem(scrollStorageKey, String(window.scrollY));
+        grid.addEventListener("input", (event) => {{
+          const notes = event.target.closest(".recipe-notes textarea"); if (!notes) return;
+          const card = notes.closest("[data-recipe-id]");
+          const recipe = {{ ...recipeFromCard(card), notes: notes.value }};
+          card.dataset.recipe = JSON.stringify(recipe);
+          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
+          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
+          save(); card.querySelector(".recipe-notes-status").textContent = "נשמר אוטומטית";
         }});
         grid.addEventListener("change", (event) => {{
           const select = event.target.closest(".recipe-prerequisite select"); if (!select) return;
@@ -466,13 +516,15 @@ def render_html(
           if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
           save(); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.append(createCard(recipe));
           grid.querySelectorAll("[data-recipe-id]").forEach((recipeCard) => updateCard(recipeCard, recipeFromCard(recipeCard)));
-          saveStatus.textContent = "Saved in this browser."; setTimeout(() => dialog.close(), 350);
+          saveStatus.textContent = "נשמר בדפדפן.";
+          if (!selectedRecipeId) setTimeout(() => dialog.close(), 350);
         }});
         deleteButton.addEventListener("click", () => {{
           const id = idInput.value; if (!id || baseIds.has(id)) return;
           state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); save(); grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
-          dialog.close();
+          if (selectedRecipeId) window.location.href = "lizapanelim_posts.html";
+          else dialog.close();
         }});
       }})();
     </script>

@@ -143,12 +143,12 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('ingredientsBox.hidden = false', document)
         self.assertIn(': [{ name: "", varieties: "", amount: "" }]', document)
         self.assertIn(r'.split(/\r?\n/)', document)
-        self.assertIn('<p class="link-row notes-link"><a>הערות</a></p><button class="edit-recipe" type="button">עריכת המתכון</button>', document)
+        self.assertIn('<section class="recipe-notes"><h3>הערות</h3><textarea aria-label="הערות למתכון"></textarea>', document)
         self.assertIn('.edit-recipe { display: block; margin: 0 0 10px auto; padding: 0; background: transparent; color: #8db7ff;', document)
         self.assertIn('<h3>הוראות הכנה</h3><pre></pre>', document)
         self.assertIn('<span>דרוש הכנה של</span><select aria-label="דרוש הכנה של">', document)
         self.assertIn('class="prerequisite-link">למתכון</a>', document)
-        self.assertIn('`#recipe-${encodeURIComponent(prerequisiteSelect.value)}`', document)
+        self.assertIn('`lizapanelim_posts.html?recipe=${encodeURIComponent(prerequisiteSelect.value)}`', document)
         self.assertIn('.recipe-prerequisite { display: flex; align-items: center;', document)
         self.assertIn('event.target.closest(".recipe-prerequisite select")', document)
         self.assertIn('prerequisiteId: select.value', document)
@@ -161,8 +161,9 @@ class RenderHtmlTests(unittest.TestCase):
         )
 
         self.assertIn('"recipeName": "roasted vegetables"', document)
-        self.assertIn(".recipe-links { text-align: right; }", document)
-        self.assertIn(".notes-link { text-align: right; }", document)
+        self.assertIn(".recipe-links { display: grid; gap: 5px;", document)
+        self.assertIn('class="card-meta" aria-label="קישורים למתכון"', document)
+        self.assertIn(".recipe-notes { margin: 14px 0;", document)
 
     def test_recipe_link_prefers_the_page_title_when_available(self) -> None:
         document = render_html(
@@ -183,11 +184,10 @@ class RenderHtmlTests(unittest.TestCase):
         cookbook = render_html([make_post()], "user", "favicon.svg")
         notes = render_notes_html([make_post()], "favicon.svg")
 
-        self.assertIn('card.querySelector(".notes-link a").href = `notes.html?id=', cookbook)
-        self.assertIn('<p class="link-row notes-link"><a>הערות</a></p>', cookbook)
+        self.assertIn('event.target.closest(".recipe-notes textarea")', cookbook)
+        self.assertIn('notes: notes.value', cookbook)
         self.assertNotIn('id="recipe-notes"', cookbook)
         self.assertIn('const scrollStorageKey = "cookbook-main-scroll-position"', cookbook)
-        self.assertIn("sessionStorage.setItem(scrollStorageKey, String(window.scrollY))", cookbook)
         self.assertIn("window.scrollTo(0, Number(savedScrollPosition) || 0)", cookbook)
         self.assertIn("<title>Recipe notes</title>", notes)
         self.assertIn('class="notes-grid"', notes)
@@ -199,8 +199,20 @@ class RenderHtmlTests(unittest.TestCase):
     def test_renders_empty_title_element_so_existing_card_can_be_edited(self) -> None:
         document = render_html([make_post(title="", caption="")], "user", "favicon.svg")
 
-        self.assertIn('<h2 class="card-title" dir="auto"></h2>', document)
+        self.assertIn('<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2>', document)
         self.assertIn('"id": "recipe-1", "title": ""', document)
+
+    def test_main_cards_link_to_a_dedicated_recipe_view(self) -> None:
+        document = render_html([make_post()], "user", "favicon.svg")
+
+        self.assertIn('document.body.classList.add(selectedRecipeId ? "recipe-view" : "cookbook-view")', document)
+        self.assertIn('.cookbook-view .recipe-ingredients,', document)
+        self.assertIn('.recipe-view .card-image a { width: min(220px, 100%); }', document)
+        self.assertIn('.recipe-view .recipe-form { margin-top: 16px;', document)
+        self.assertIn('const detailUrl = `lizapanelim_posts.html?recipe=${encodeURIComponent(recipe.id)}`', document)
+        self.assertIn('card.hidden = card.dataset.recipeId !== selectedRecipeId', document)
+        self.assertIn('selectedCard.append(form)', document)
+        self.assertIn('openEditor(recipeFromCard(selectedCard), !baseIds.has(selectedRecipeId), true)', document)
 
     def test_existing_and_custom_recipes_use_the_same_card_factory(self) -> None:
         document = render_html([make_post()], "user", "favicon.svg")
