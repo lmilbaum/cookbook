@@ -304,6 +304,12 @@ def render_html(
         state.order = state.order.filter((id) => availableIds.has(id));
         allRecipes().forEach((recipe) => {{ if (!state.order.includes(recipe.id)) state.order.push(recipe.id); }});
 
+        // Source data owns the order of imported recipes. Preserve browser-only
+        // recipes in their existing slots when the source order changes.
+        const sourceOrder = baseRecipes.map((recipe) => recipe.id);
+        let sourceIndex = 0;
+        state.order = state.order.map((id) => baseIds.has(id) ? sourceOrder[sourceIndex++] : id);
+
         const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
         const safeLink = (value) => {{
           if (!value) return "";
