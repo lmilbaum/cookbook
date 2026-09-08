@@ -4,11 +4,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
-COPY pyproject.toml ./
-COPY src ./src
+COPY . .
 RUN pip install --no-cache-dir .
-COPY docker-entrypoint.sh /usr/local/bin/cookbook-entrypoint
 
 WORKDIR /data
 EXPOSE 8765
-ENTRYPOINT ["sh", "/usr/local/bin/cookbook-entrypoint"]
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]

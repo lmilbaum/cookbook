@@ -43,10 +43,19 @@ postgresql://cookbook:cookbook_dev@127.0.0.1:5432/cookbook
 ```
 
 Keep `DATABASE_URL` in sync when changing the user, password, port, or database;
-URL-encode special characters in credentials. The application does not consume
-`DATABASE_URL` yet, and no recipe tables or migrations have been added. When
-database integration is added, the container must connect to `postgres:5432`
-instead of `127.0.0.1` and the host port.
+URL-encode special characters in credentials. The application uses SQLAlchemy
+with the psycopg driver, so host URLs should use the
+`postgresql+psycopg://` scheme. The Compose application receives an equivalent
+URL that connects to `postgres:5432` inside the Compose network.
+
+Schema changes are version-controlled with Alembic. The app applies pending
+migrations before starting; the initial migration only establishes Alembic's
+version record and does not create recipe tables or touch the file-backed data.
+For a host-run migration, load the environment and run:
+
+```sh
+uv run alembic -c pyproject.toml upgrade head
+```
 
 Verify a SQL connection or open an interactive shell:
 
@@ -70,6 +79,6 @@ data; use it only when intentionally resetting the development database.
 Initialization settings apply only to an empty volume. Changing credentials
 in `.env` does not update an existing database's credentials.
 
-The image is pinned to PostgreSQL major version 18. Its volume is mounted at
+The image is pinned to PostgreSQL version 18.6. Its volume is mounted at
 `/var/lib/postgresql`, following the [official image's storage layout](https://hub.docker.com/_/postgres).
 Major-version upgrades require a database migration, not just changing the tag.

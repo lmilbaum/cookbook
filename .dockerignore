@@ -2,6 +2,8 @@
 !pyproject.toml
 !src/
 !src/**
+!migrations/
+!migrations/**
 !docker-entrypoint.sh
 **/__pycache__/
 **/*.pyc
