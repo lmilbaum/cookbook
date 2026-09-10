@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 cookbook = "cookbook.main:main"
 cookbook-server = "cookbook.server:main"
+cookbook-import-post-store = "cookbook.post_store_import:main"
 
 [build-system]
 requires = ["hatchling"]

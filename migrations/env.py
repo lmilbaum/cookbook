@@ -8,6 +8,7 @@ from pathlib import Path
 from alembic import context
 
 from cookbook.database import Base, database_url
+from cookbook.models import Post  # noqa: F401 - registers metadata with Base.
 
 
 config = context.config

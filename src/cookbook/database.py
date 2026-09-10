@@ -1,8 +1,4 @@
-"""Database configuration and SQLAlchemy session primitives.
-
-No application tables are declared here yet.  Keeping the engine lazy means
-commands that do not use the database remain importable during the migration.
-"""
+"""Database configuration and SQLAlchemy session primitives."""
 
 from __future__ import annotations
 

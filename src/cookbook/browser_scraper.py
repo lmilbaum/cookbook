@@ -243,6 +243,25 @@ def _merge_media_paths(
     return new_items
 
 
+def _select_unseen_media_paths(
+    media_paths: list[str],
+    seen_shortcodes: set[str],
+    feed_position_from_end: int,
+) -> list[str]:
+    """Select unseen media, optionally by one-based position from the end."""
+
+    unseen_paths = [
+        media_path
+        for media_path in media_paths
+        if _shortcode_from_media_path(media_path) not in seen_shortcodes
+    ]
+    if feed_position_from_end <= 0:
+        return unseen_paths
+
+    position = len(unseen_paths) - feed_position_from_end
+    return [unseen_paths[position]] if position >= 0 else []
+
+
 def _scroll_profile_until_complete(page: Any, username: str) -> list[str]:
     """Scroll the profile until no new media items are loaded."""
 
@@ -477,18 +496,14 @@ def fetch_posts_browser(
                     f"No posts found on profile {username}. The profile may be private or Instagram changed the page structure."
                 )
 
+            media_paths = _select_unseen_media_paths(
+                media_paths, seen_shortcodes, feed_position_from_end
+            )
+
+            # The requested position is always relative to Instagram's native
+            # feed order.  ``reverse`` affects only the report's display order.
             if reverse:
                 media_paths.reverse()
-
-            if feed_position_from_end > 0:
-                position = len(media_paths) - feed_position_from_end
-                media_paths = [media_paths[position]] if position >= 0 else []
-
-            media_paths = [
-                media_path
-                for media_path in media_paths
-                if _shortcode_from_media_path(media_path) not in seen_shortcodes
-            ]
 
             if limit > 0:
                 media_paths = media_paths[:limit]

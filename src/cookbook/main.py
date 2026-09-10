@@ -16,6 +16,8 @@ from .browser_scraper import fetch_posts_browser
 from .config import AppConfig, load_config, parse_args, resolve_from
 from .dependencies import load_dotenv_loader
 from .models import PostItem
+from .database import create_session_factory
+from .post_repository import insert_missing_posts, load_posts
 from .report_html import (
     render_html,
     render_notes_html,
@@ -407,6 +409,9 @@ def _fetch_posts_with_fallback(
 ) -> list[PostItem]:
     """Try API first, then fall back to browser scraping on unauthorized response."""
 
+    if config.use_browser:
+        return _fetch_posts_browser_only(config, login_user, password, seen_shortcodes)
+
     cooldown_path = _cooldown_marker_path(config.session_file)
     cooldown_until = _read_cooldown_until(cooldown_path)
     now_utc = datetime.now(UTC)
@@ -437,17 +442,20 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     config_path = Path(args.config)
     config = load_config(config_path)
 
+    if args.limit is not None:
+        config.limit = args.limit
+    if args.feed_position_from_end is not None:
+        config.feed_position_from_end = args.feed_position_from_end
+
     if config.limit < 0:
         raise ValueError("Config key 'limit' must be >= 0.")
+    if config.feed_position_from_end < 0:
+        raise ValueError("--feed-position-from-end must be >= 0.")
 
     base_dir = config_path.parent.resolve()
     env_path = resolve_from(base_dir, config.env_file)
     session_path = resolve_from(base_dir, config.session_file)
     output_path = resolve_from(base_dir, config.output)
-    seen_path = _seen_posts_path(output_path)
-    store_path = _post_store_path(output_path)
-    titles_path = _titles_path(output_path)
-
     load_dotenv = load_dotenv_loader()
     load_dotenv(env_path)
 
@@ -455,44 +463,38 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     password = os.getenv("INSTAGRAM_PASSWORD", "").strip()
     config.session_file = str(session_path)
 
-    seen_shortcodes = _load_seen_shortcodes(seen_path, output_path)
-    titles = _load_titles(titles_path)
-    fetch_seen_shortcodes = set() if config.ignore_cached_posts else seen_shortcodes
+    session_factory = create_session_factory()
+    fetch_seen_shortcodes: set[str] = set()
     existing_posts: list[PostItem] = []
     if not config.ignore_cached_posts:
-        _migrate_titles_to_post_items(store_path, titles)
-        existing_posts = _load_post_store(store_path, reverse=config.reverse)
-        if not existing_posts and output_path.exists():
-            existing_posts = _load_existing_posts(output_path)
-            _write_post_items(store_path, existing_posts)
-        fetch_seen_shortcodes |= {post.shortcode for post in existing_posts}
+        existing_posts = load_posts(session_factory, reverse=config.reverse)
+        fetch_seen_shortcodes = {post.shortcode for post in existing_posts}
         if config.feed_position_from_end > 0:
             fetch_seen_shortcodes = {post.shortcode for post in existing_posts}
 
     fetch_config = config
     should_fetch = True
     if not config.ignore_cached_posts and config.limit > 0:
-        remaining_slots = max(config.limit - len(existing_posts), 0)
-        should_fetch = remaining_slots > 0
-        if should_fetch:
-            fetch_config = replace(config, limit=remaining_slots)
+        if config.feed_position_from_end > 0:
+            # A targeted position is a request for one candidate, independent
+            # of how many posts have already been imported.
+            fetch_config = replace(config, limit=1)
+        else:
+            remaining_slots = max(config.limit - len(existing_posts), 0)
+            should_fetch = remaining_slots > 0
+            if should_fetch:
+                fetch_config = replace(config, limit=remaining_slots)
 
     new_posts = (
         _fetch_posts_with_fallback(fetch_config, login_user, password, fetch_seen_shortcodes)
         if should_fetch
         else []
     )
-    new_posts = _apply_titles(new_posts, titles)
     if not config.ignore_cached_posts:
-        _write_post_items(store_path, new_posts)
-    merged_posts = new_posts if config.ignore_cached_posts else _merge_posts(
-        existing_posts,
-        new_posts,
-        config.reverse,
-    )
-    if not config.ignore_cached_posts and config.limit > 0:
-        merged_posts = merged_posts[:config.limit]
-
+        insert_missing_posts(session_factory, new_posts)
+        merged_posts = load_posts(session_factory, reverse=config.reverse)
+    else:
+        merged_posts = new_posts
     report_posts = _cache_images_for_report(
         merged_posts,
         output_path,
@@ -512,7 +514,6 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
             report_posts,
             config.username,
             favicon_href=favicon_path.name,
-            titles=titles,
         ),
         encoding="utf-8",
     )
@@ -526,12 +527,6 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
         render_notes_html(report_posts, favicon_href=favicon_path.name),
         encoding="utf-8",
     )
-    if not config.ignore_cached_posts:
-        _write_seen_shortcodes(
-            seen_path,
-            seen_shortcodes | {post.shortcode for post in merged_posts},
-        )
-
     if not args.no_open:
         was_opened = webbrowser.open(html_path.resolve().as_uri())
         if not was_opened:
@@ -542,9 +537,9 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     action = "Updated HTML report" if args.no_open else "Updated and opened HTML report"
     print(f"{action} -> {html_path}")
     if config.ignore_cached_posts:
-        print("Skipped processed-post sidecar update (strict window mode)")
+        print("Skipped database writes (strict window mode)")
     else:
-        print(f"Updated processed-post sidecar -> {seen_path}")
+        print("Post source of truth: PostgreSQL")
 
 
 if __name__ == "__main__":

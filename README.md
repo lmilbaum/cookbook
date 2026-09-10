@@ -57,6 +57,16 @@ For a host-run migration, load the environment and run:
 uv run alembic -c pyproject.toml upgrade head
 ```
 
+After that, import the existing durable per-post JSON store once. The command
+is idempotent: it adds missing shortcodes and never overwrites existing rows.
+After this one-time import, normal `cookbook` runs use PostgreSQL as the post
+source of truth. They still generate JSON and HTML report files for the static
+web UI, but those files are not read back as post data.
+
+```sh
+uv run cookbook-import-post-store --store lizapanelim_posts_items
+```
+
 Verify a SQL connection or open an interactive shell:
 
 ```sh

@@ -40,6 +40,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Generate the report without opening a new browser tab.",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Override the configured maximum number of posts to fetch.",
+    )
+    parser.add_argument(
+        "--feed-position-from-end",
+        type=int,
+        help="Fetch one post at this one-based position from Instagram's feed end.",
+    )
     return parser.parse_args()
 
 
