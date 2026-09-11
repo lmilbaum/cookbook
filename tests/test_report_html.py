@@ -254,6 +254,10 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('["/lizapanelim_posts_assets/", "/recipes/"]', document)
         self.assertIn("`${window.location.origin}${url.pathname.slice", document)
 
+    def test_shopping_list_displays_items_alphabetically(self) -> None:
+        document = render_shopping_list_html("favicon.svg")
+        self.assertIn('a.name.localeCompare(b.name, "he")', document)
+
     def test_shopping_list_can_be_sent_to_trello(self) -> None:
         document = render_shopping_list_html("favicon.svg")
 

@@ -4,10 +4,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sqlalchemy import JSON, Boolean, Integer, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
+
+
+class Ingredient(Base):
+    """An ingredient reusable across shopping items."""
+
+    __tablename__ = "ingredients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, unique=True)
+
+
+class ShoppingListItem(Base):
+    """One item in the single shared shopping list."""
+
+    __tablename__ = "shopping_list"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    ingredient_id: Mapped[int] = mapped_column(ForeignKey("ingredients.id"))
+    quantity: Mapped[str | None] = mapped_column(Text)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Post(Base):

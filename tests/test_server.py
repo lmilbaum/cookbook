@@ -1,4 +1,4 @@
-"""Tests for the file-backed cookbook server."""
+"""Tests for the cookbook server."""
 
 from typing import Any
 
@@ -113,3 +113,57 @@ def test_updates_existing_card_instead_of_creating_another(monkeypatch: Any) -> 
     assert result["action"] == "updated"
     assert not any(method == "POST" and path == "cards" for method, path, _ in calls)
     assert not any(method in {"POST", "PUT", "DELETE"} for method, _, _ in calls)
+
+
+def test_database_shopping_api(tmp_path, monkeypatch) -> None:
+    import io
+    import json
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.orm import sessionmaker
+
+    from cookbook.database import Base
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    handler_type = server.make_handler(tmp_path, factory)
+    handler = object.__new__(handler_type)
+    handler.path = "/api/shopping-list"
+    responses = []
+    handler._json_response = lambda status, payload: responses.append((status, payload))
+    legacy = tmp_path / "shopping_list.json"
+    legacy.write_text("legacy file remains untouched")
+    handler.do_GET()
+    assert responses.pop() == (200, [])
+
+    def put(payload):
+        body = json.dumps(payload).encode()
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        handler.do_PUT()
+        return responses.pop()
+
+    items = [{"id": "a", "name": "Milk", "done": False, "quantity": "2"}]
+    assert put(items) == (200, {"saved": True})
+    handler.do_GET()
+    assert responses.pop() == (200, items)
+    assert put(items * 2)[0] == 400
+    assert put([{**items[0], "quantity": 2}])[0] == 400
+    handler.do_GET()
+    assert responses.pop() == (200, items)
+    assert put([])[0] == 200
+    handler.do_GET()
+    assert responses.pop() == (200, [])
+    assert legacy.read_text() == "legacy file remains untouched"
+
+    def unavailable(*args):
+        raise SQLAlchemyError("private connection details")
+
+    monkeypatch.setattr(server, "save_shopping_list", unavailable)
+    assert put(items) == (503, {"error": "Unable to save shopping list"})
+    monkeypatch.setattr(server, "load_shopping_list", unavailable)
+    handler.do_GET()
+    assert responses.pop() == (503, {"error": "Unable to read shopping list"})
+    engine.dispose()

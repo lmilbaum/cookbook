@@ -21,7 +21,8 @@ Set `APP_PORT` in `.env` to change the web port. `make up` rebuilds the
 application image so Python code changes take effect.
 
 The application mounts this checkout at `/data`, preserving imported recipes,
-generated pages, and shopping-list changes on the host. An empty recipe data
+and generated pages on the host. Shopping-list changes are stored in the
+PostgreSQL volume. An empty recipe data
 file is created only if none exists. The server regenerates pages on startup
 and when recipe data changes. Existing `.env` settings remain available to the
 server. This is a local development setup; the web server serves this directory.
@@ -62,6 +63,26 @@ is idempotent: it adds missing shortcodes and never overwrites existing rows.
 After this one-time import, normal `cookbook` runs use PostgreSQL as the post
 source of truth. They still generate JSON and HTML report files for the static
 web UI, but those files are not read back as post data.
+
+The schema also includes `ingredients` (one row per ingredient) and
+`shopping_list` (one row per item, referencing an ingredient, with optional
+quantity and checked status). Shopping items are displayed alphabetically;
+there is no stored position or separate list record. The shopping-list API now
+reads and writes PostgreSQL. Before starting the updated server, apply migrations
+and import your existing list once (load `DATABASE_URL` from your environment):
+
+```sh
+uv run alembic -c pyproject.toml upgrade head
+uv run cookbook-import-shopping-list --file shopping_list.json
+```
+
+The import retains the JSON file and refuses to run once ingredients exist,
+including after the shopping list has been cleared. Normal server operation
+never reads or writes that legacy file. An empty database returns an empty list;
+browser-only lists should be backed up before switching to the database server.
+Database save failures are shown in the UI, with a browser-local backup retained.
+
+Import recipe posts separately:
 
 ```sh
 uv run cookbook-import-post-store --store lizapanelim_posts_items

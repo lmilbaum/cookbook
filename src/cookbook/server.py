@@ -1,4 +1,4 @@
-"""Serve the cookbook and persist its shopping list to disk."""
+"""Serve the cookbook and persist its shopping list in the database."""
 
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
+
+from .database import create_session_factory
+from .shopping_list_repository import load_shopping_list, save_shopping_list, valid_items
 
 from .models import PostItem
 
@@ -79,14 +84,7 @@ def _watch_and_render(data_file: Path) -> None:
 def _valid_items(value: Any) -> bool:
     """Return whether value is a safe shopping-list payload."""
 
-    return isinstance(value, list) and all(
-        isinstance(item, dict)
-        and isinstance(item.get("id"), str)
-        and isinstance(item.get("name"), str)
-        and len(item["name"]) <= 120
-        and isinstance(item.get("done"), bool)
-        for item in value
-    )
+    return valid_items(value)
 
 
 def _trello_request(
@@ -223,8 +221,8 @@ def _create_trello_card(items: list[dict[str, Any]]) -> dict[str, str]:
     return {"id": card["id"], "url": card["url"], "action": action}
 
 
-def make_handler(root: Path, data_path: Path) -> type[SimpleHTTPRequestHandler]:
-    """Create a request handler bound to the cookbook and data paths."""
+def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPRequestHandler]:
+    """Create a request handler bound to the cookbook directory and database."""
 
     class CookbookHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -242,13 +240,10 @@ def make_handler(root: Path, data_path: Path) -> type[SimpleHTTPRequestHandler]:
             if urlsplit(self.path).path != "/api/shopping-list":
                 super().do_GET()
                 return
-            if not data_path.exists():
-                self._json_response(200, None)
-                return
             try:
-                items = json.loads(data_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                self._json_response(500, {"error": "Unable to read shopping list"})
+                items = load_shopping_list(factory)
+            except SQLAlchemyError:
+                self._json_response(503, {"error": "Unable to read shopping list"})
                 return
             self._json_response(200, items)
 
@@ -258,7 +253,7 @@ def make_handler(root: Path, data_path: Path) -> type[SimpleHTTPRequestHandler]:
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length > 1_000_000:
+                if not 0 < length <= 1_000_000:
                     raise ValueError
                 items = json.loads(self.rfile.read(length))
             except (ValueError, json.JSONDecodeError):
@@ -267,11 +262,11 @@ def make_handler(root: Path, data_path: Path) -> type[SimpleHTTPRequestHandler]:
             if not _valid_items(items):
                 self._json_response(400, {"error": "Invalid shopping list"})
                 return
-            temporary_path = data_path.with_suffix(f"{data_path.suffix}.tmp")
-            temporary_path.write_text(
-                json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            temporary_path.replace(data_path)
+            try:
+                save_shopping_list(factory, items)
+            except SQLAlchemyError:
+                self._json_response(503, {"error": "Unable to save shopping list"})
+                return
             self._json_response(200, {"saved": True})
 
         def do_POST(self) -> None:
@@ -280,7 +275,7 @@ def make_handler(root: Path, data_path: Path) -> type[SimpleHTTPRequestHandler]:
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length > 1_000_000:
+                if not 0 < length <= 1_000_000:
                     raise ValueError
                 items = json.loads(self.rfile.read(length))
             except (ValueError, json.JSONDecodeError):
@@ -322,7 +317,7 @@ def main() -> None:
     args = parser.parse_args()
     root = args.directory.resolve()
     load_dotenv(root / ".env")
-    data_path = root / "shopping_list.json"
+    factory = create_session_factory()
     report_data_path = root / "lizapanelim_posts.json"
     if args.reload:
         threading.Thread(
@@ -330,10 +325,10 @@ def main() -> None:
             args=(report_data_path,),
             daemon=True,
         ).start()
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(root, data_path))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(root, factory))
     url = f"http://{args.host}:{args.port}/lizapanelim_posts.html"
     print(f"Cookbook available at {url}")
-    print(f"Shopping list saved to {data_path}")
+    print("Shopping list saved to the database.")
     if not args.no_open:
         threading.Timer(0.2, webbrowser.open, args=(url,)).start()
     try:

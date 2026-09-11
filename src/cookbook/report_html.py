@@ -709,7 +709,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
             method: "PUT",
             headers: {{ "Content-Type": "application/json" }},
             body: JSON.stringify(items),
-          }}).catch(() => {{ exportStatus.textContent = "השמירה לקובץ נכשלה; הרשימה נשמרה בדפדפן בלבד."; }});
+          }}).then((response) => {{ if (!response.ok) throw new Error("Unable to save shopping list"); }}).catch(() => {{ exportStatus.textContent = "השמירה לשרת נכשלה; הרשימה נשמרה בדפדפן בלבד."; }});
         }};
         const loadPersistedItems = async () => {{
           if (!location.protocol.startsWith("http")) return;
@@ -725,12 +725,12 @@ def render_shopping_list_html(favicon_href: str) -> str:
               save();
             }}
           }} catch (error) {{
-            exportStatus.textContent = "לא ניתן לטעון את הקובץ; מוצגת הרשימה השמורה בדפדפן.";
+            exportStatus.textContent = "לא ניתן לטעון את הרשימה מהשרת; מוצגת הרשימה השמורה בדפדפן.";
           }}
         }};
         const render = () => {{
           itemsElement.replaceChildren();
-          items.forEach((item) => {{
+          [...items].sort((a, b) => a.name.localeCompare(b.name, "he")).forEach((item) => {{
             const row = document.createElement("div");
             row.className = `shopping-item${{item.done ? " done" : ""}}`;
             const checkbox = document.createElement("input");
