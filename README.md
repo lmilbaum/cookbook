@@ -22,9 +22,12 @@ application image so Python code changes take effect.
 
 The application mounts this checkout at `/data`, preserving imported recipes,
 and generated pages on the host. Shopping-list changes are stored in the
-PostgreSQL volume. An empty recipe data
-file is created only if none exists. The server regenerates pages on startup
-and when recipe data changes. Existing `.env` settings remain available to the
+PostgreSQL volume. The server generates pages from database posts on startup;
+Compose enables `--reload`, which polls for database and renderer changes every
+second. Without `--reload`, restart the server to regenerate pages. An empty
+database produces an empty cookbook. Generated pages prefer existing images in
+`lizapanelim_posts_assets` over external image URLs stored in the database. Legacy post JSON files are never read or
+modified by the server; import them before switching to database-backed pages. Existing `.env` settings remain available to the
 server. This is a local development setup; the web server serves this directory.
 
 Compose defaults to database `cookbook`, user `cookbook`, password

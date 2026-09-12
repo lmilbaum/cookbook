@@ -1,4 +1,4 @@
-"""Serve the cookbook and persist its shopping list in the database."""
+"""Serve database-backed cookbook reports and shopping lists."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import os
 import threading
 import time
 import webbrowser
+from dataclasses import replace
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -24,61 +25,62 @@ from .database import create_session_factory
 from .shopping_list_repository import load_shopping_list, save_shopping_list, valid_items
 
 from .models import PostItem
+from .post_repository import load_posts
 
 
-def _render_reports(data_file: Path) -> None:
-    """Rebuild static report pages from the existing post data."""
+def _render_reports(report_path: Path, posts: list[PostItem]) -> None:
+    """Rebuild static pages from a database snapshot, leaving JSON exports alone."""
 
     from . import report_html  # Imported here so development reloads can refresh it.
 
     report_html = importlib.reload(report_html)
-    payload = json.loads(data_file.read_text(encoding="utf-8"))
-    if not isinstance(payload, list):
-        raise ValueError(f"Post data must contain a list: {data_file}")
-    posts = [PostItem(**item) for item in payload]
-    favicon_path = report_html.write_favicon(data_file)
-    html_path = data_file.with_suffix(".html")
-    html_path.write_text(
+    assets_dir = report_path.with_name(f"{report_path.stem}_assets")
+    cached_assets = {
+        asset.stem: asset
+        for asset in sorted(assets_dir.glob("*"), reverse=True)
+        if asset.is_file() and asset.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+    }
+    posts = [
+        replace(post, image_url=cached_assets[post.shortcode].relative_to(report_path.parent).as_posix())
+        if post.shortcode in cached_assets else post
+        for post in posts
+    ]
+    favicon_path = report_html.write_favicon(report_path)
+    report_path.write_text(
         report_html.render_html(
             posts,
-            data_file.stem.removesuffix("_posts"),
+            report_path.stem.removesuffix("_posts"),
             favicon_path.name,
         ),
         encoding="utf-8",
     )
-    html_path.with_name("shopping_list.html").write_text(
+    report_path.with_name("shopping_list.html").write_text(
         report_html.render_shopping_list_html(favicon_path.name), encoding="utf-8"
     )
-    html_path.with_name("notes.html").write_text(
+    report_path.with_name("notes.html").write_text(
         report_html.render_notes_html(posts, favicon_path.name), encoding="utf-8"
     )
 
 
-def _watch_and_render(data_file: Path) -> None:
-    """Rebuild report pages whenever their renderer or source data changes."""
+def _watch_and_render(
+    report_path: Path, factory: sessionmaker[Session]
+) -> None:
+    """Poll database posts and renderer code, rebuilding only when they change."""
 
-    watched_paths = (Path(__file__).with_name("report_html.py"), data_file)
-    modified = {
-        path: path.stat().st_mtime_ns if path.exists() else 0 for path in watched_paths
-    }
-    try:
-        _render_reports(data_file)
-        print("Reload mode: generated report pages.")
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
-        print(f"Reload mode: unable to generate report pages: {error}")
+    renderer_path = Path(__file__).with_name("report_html.py")
+    previous: tuple[int, list[PostItem]] | None = None
     while True:
-        time.sleep(0.5)
-        current = {
-            path: path.stat().st_mtime_ns if path.exists() else 0 for path in watched_paths
-        }
-        if current == modified:
-            continue
-        modified = current
         try:
-            _render_reports(data_file)
-            print("Reload mode: updated report pages. Refresh the browser to view changes.")
-        except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+            current = (renderer_path.stat().st_mtime_ns, load_posts(factory, reverse=False))
+            if current != previous:
+                _render_reports(report_path, current[1])
+                previous = current
+                print("Reload mode: updated report pages. Refresh the browser to view changes.")
+        except SQLAlchemyError:
+            print("Reload mode: unable to read cookbook posts from the database.")
+        except (OSError, TypeError, ValueError) as error:
             print(f"Reload mode: unable to update report pages: {error}")
+        time.sleep(1)
 
 
 def _valid_items(value: Any) -> bool:
@@ -225,6 +227,8 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
     """Create a request handler bound to the cookbook directory and database."""
 
     class CookbookHandler(SimpleHTTPRequestHandler):
+        extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".webp": "image/webp"}
+
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, directory=str(root), **kwargs)
 
@@ -312,17 +316,18 @@ def main() -> None:
     parser.add_argument(
         "--reload",
         action="store_true",
-        help="Automatically rebuild report pages when renderer code or post data changes.",
+        help="Automatically rebuild report pages when renderer code or database posts change.",
     )
     args = parser.parse_args()
     root = args.directory.resolve()
     load_dotenv(root / ".env")
     factory = create_session_factory()
-    report_data_path = root / "lizapanelim_posts.json"
+    report_path = root / "lizapanelim_posts.html"
+    _render_reports(report_path, load_posts(factory, reverse=False))
     if args.reload:
         threading.Thread(
             target=_watch_and_render,
-            args=(report_data_path,),
+            args=(report_path, factory),
             daemon=True,
         ).start()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(root, factory))

@@ -130,6 +130,7 @@ def test_database_shopping_api(tmp_path, monkeypatch) -> None:
     factory = sessionmaker(bind=engine)
     handler_type = server.make_handler(tmp_path, factory)
     handler = object.__new__(handler_type)
+    assert handler.guess_type("image.webp") == "image/webp"
     handler.path = "/api/shopping-list"
     responses = []
     handler._json_response = lambda status, payload: responses.append((status, payload))
@@ -167,3 +168,73 @@ def test_database_shopping_api(tmp_path, monkeypatch) -> None:
     handler.do_GET()
     assert responses.pop() == (503, {"error": "Unable to read shopping list"})
     engine.dispose()
+
+
+def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from cookbook.database import Base
+    from cookbook.models import PostItem
+    from cookbook.post_repository import insert_missing_posts, load_posts, mark_not_recipe
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    legacy = tmp_path / "lizapanelim_posts.json"
+    legacy.write_text("invalid legacy JSON must not be read")
+    report = legacy.with_suffix(".html")
+    item = PostItem(
+        shortcode="database-recipe", url="https://example.com/recipe", image_url="",
+        caption="Database recipe caption", timestamp_utc="2026-01-01T00:00:00+00:00",
+        likes=0, comments=0, typename="GraphImage", is_video=False,
+        title="Database recipe title",
+    )
+    item.image_url = "https://expired.example/recipe.jpg"
+    assets = tmp_path / "lizapanelim_posts_assets"
+    assets.mkdir()
+    cached_image = assets / f"{item.shortcode}.jpg"
+    cached_image.write_bytes(b"cached image")
+    insert_missing_posts(factory, [item])
+    server._render_reports(report, load_posts(factory, reverse=False))
+    assert "Database recipe title" in report.read_text()
+    assert "lizapanelim_posts_assets/database-recipe.jpg" in report.read_text()
+    assert "expired.example" not in report.read_text()
+    assert load_posts(factory, reverse=False)[0].image_url == item.image_url
+    assert cached_image.read_bytes() == b"cached image"
+    assert (tmp_path / "notes.html").exists()
+    assert (tmp_path / "shopping_list.html").exists()
+    mark_not_recipe(factory, item.shortcode)
+    server._render_reports(report, load_posts(factory, reverse=False))
+    assert "Database recipe title" not in report.read_text()
+    assert legacy.read_text() == "invalid legacy JSON must not be read"
+    engine.dispose()
+
+
+def test_reload_retries_database_failure_and_only_renders_changes(tmp_path, monkeypatch, capsys) -> None:
+    import pytest
+    from sqlalchemy.exc import SQLAlchemyError
+
+    snapshots = iter([SQLAlchemyError("secret"), [], [], ["changed"]])
+    rendered = []
+    polls = 0
+
+    def load(*args, **kwargs):
+        snapshot = next(snapshots)
+        if isinstance(snapshot, Exception):
+            raise snapshot
+        return snapshot
+
+    def sleep(_seconds):
+        nonlocal polls
+        polls += 1
+        if polls == 4:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(server, "load_posts", load)
+    monkeypatch.setattr(server, "_render_reports", lambda path, posts: rendered.append(posts))
+    monkeypatch.setattr(server.time, "sleep", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        server._watch_and_render(tmp_path / "report.html", None)
+    assert rendered == [[], ["changed"]]
+    assert "secret" not in capsys.readouterr().out
