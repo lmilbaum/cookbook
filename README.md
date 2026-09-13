@@ -24,7 +24,10 @@ The application mounts this checkout at `/data`, preserving imported recipes,
 and generated pages on the host. Shopping-list changes are stored in the
 PostgreSQL volume. The server generates pages from database posts on startup;
 Compose enables `--reload`, which polls for database and renderer changes every
-second. Without `--reload`, restart the server to regenerate pages. An empty
+second. Recipe order follows `reverse` in the served directory’s `cookbook.toml`:
+`true` displays oldest first and `false` displays newest first (also the default
+when no configuration file exists). Reload mode also picks up ordering changes.
+Without `--reload`, restart the server to regenerate pages. An empty
 database produces an empty cookbook. Generated pages prefer existing images in
 `lizapanelim_posts_assets` over external image URLs stored in the database. Legacy post JSON files are never read or
 modified by the server; import them before switching to database-backed pages. Existing `.env` settings remain available to the
@@ -84,6 +87,26 @@ including after the shopping list has been cleared. Normal server operation
 never reads or writes that legacy file. An empty database returns an empty list;
 browser-only lists should be backed up before switching to the database server.
 Database save failures are shown in the UI, with a browser-local backup retained.
+
+Recipe edits, custom recipes, ingredients entered in recipes, preparation links,
+and notes now share database storage through `/api/recipe-state`. This migration
+retains the existing browser state format in a versioned JSON record, separate
+from scraped posts. Apply pending migrations before starting the updated server.
+On the first visit, an unused database imports recipe changes from that browser's
+`cookbook-recipe-changes-v1` local storage. Open the cookbook first in the browser
+containing the edits you want to migrate. Once initialized, the database is the
+source of truth, including after custom recipes are deleted. Other browsers'
+legacy copies are retained but are not automatically merged.
+
+Both cookbook and notes pages save to the database. Save feedback appears beside
+the edited field or form; success clears after two seconds and errors remain
+visible. Opening the cookbook does not save unchanged recipe state. Concurrent edits from a
+stale tab are rejected: reload before editing again. Save failures are displayed
+on the page; unsaved changes are retained in browser storage under
+`cookbook-recipe-changes-v1-backup-<timestamp>`. The original browser copy is
+never overwritten by hosted pages. Opening exported pages through `file://`
+continues to use browser-only storage. Database snapshots cover the entire
+recipe editing state, so concurrent edits to different recipes also conflict.
 
 Import recipe posts separately:
 

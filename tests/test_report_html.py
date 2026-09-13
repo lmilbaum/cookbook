@@ -129,7 +129,7 @@ class RenderHtmlTests(unittest.TestCase):
             'id="delete-recipe"',
             'class="edit-recipe"',
             'const storageKey = "cookbook-recipe-changes-v1"',
-            "localStorage.setItem(storageKey, JSON.stringify(state))",
+            "localStorage.setItem(hosted ? backupKey : storageKey, JSON.stringify(snapshot))",
         ):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, document)
@@ -194,7 +194,7 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('new URLSearchParams(window.location.search).get("id")', notes)
         self.assertIn('candidate.id === recipeId', notes)
         self.assertIn('input.dir = "rtl"', notes)
-        self.assertIn('localStorage.setItem(storageKey, JSON.stringify(state))', notes)
+        self.assertIn('localStorage.setItem(hosted ? backupKey : storageKey, JSON.stringify(snapshot))', notes)
 
     def test_renders_empty_title_element_so_existing_card_can_be_edited(self) -> None:
         document = render_html([make_post(title="", caption="")], "user", "favicon.svg")
@@ -275,3 +275,20 @@ class RenderHtmlTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_recipe_save_feedback_is_local_and_temporary() -> None:
+    cookbook = render_html([make_post()], "user", "favicon.svg")
+    notes = render_notes_html([make_post()], "favicon.svg")
+    for document in (cookbook, notes):
+        assert 'report("Saved.", true)' in document
+        assert 'clearTimeout(target.saveTimer)' in document
+        assert 'statusVersions.get(target) === version' in document
+        assert 'persistenceStatus.hidden = true' in document
+        assert 'Saved to database.' not in document
+    assert 'save(card.querySelector(".recipe-notes-status"))' in cookbook
+    assert 'save(card.querySelector(".prerequisite-status"))' in cookbook
+    assert 'const saved = save(saveStatus)' in cookbook
+    assert 'if (!await saved) return' in cookbook
+    assert 'grid.append(createCard(recipesById.get(id))));\n        save();' not in cookbook
+    assert 'save(status)' in notes

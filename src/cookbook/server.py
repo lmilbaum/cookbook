@@ -21,7 +21,11 @@ from dotenv import load_dotenv
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .config import load_config
 from .database import create_session_factory
+from .recipe_state_repository import (
+    RecipeStateConflict, load_recipe_state, save_recipe_state,
+)
 from .shopping_list_repository import load_shopping_list, save_shopping_list, valid_items
 
 from .models import PostItem
@@ -62,6 +66,15 @@ def _render_reports(report_path: Path, posts: list[PostItem]) -> None:
     )
 
 
+
+def _load_report_posts(root: Path, factory: sessionmaker[Session]) -> list[PostItem]:
+    """Use the same recipe ordering as the importer when configuration exists."""
+
+    config_path = root / "cookbook.toml"
+    reverse = load_config(config_path).reverse if config_path.exists() else False
+    return load_posts(factory, reverse=reverse)
+
+
 def _watch_and_render(
     report_path: Path, factory: sessionmaker[Session]
 ) -> None:
@@ -71,7 +84,7 @@ def _watch_and_render(
     previous: tuple[int, list[PostItem]] | None = None
     while True:
         try:
-            current = (renderer_path.stat().st_mtime_ns, load_posts(factory, reverse=False))
+            current = (renderer_path.stat().st_mtime_ns, _load_report_posts(report_path.parent, factory))
             if current != previous:
                 _render_reports(report_path, current[1])
                 previous = current
@@ -241,6 +254,14 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self.wfile.write(body)
 
         def do_GET(self) -> None:
+            if urlsplit(self.path).path == "/api/recipe-state":
+                try:
+                    payload = load_recipe_state(factory)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to read recipe state"})
+                    return
+                self._json_response(200, payload)
+                return
             if urlsplit(self.path).path != "/api/shopping-list":
                 super().do_GET()
                 return
@@ -252,6 +273,26 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self._json_response(200, items)
 
         def do_PUT(self) -> None:
+            if urlsplit(self.path).path == "/api/recipe-state":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 1_000_000:
+                        raise ValueError
+                    payload = json.loads(self.rfile.read(length))
+                    if not isinstance(payload, dict) or set(payload) != {"state", "revision"}:
+                        raise ValueError
+                    revision = save_recipe_state(factory, payload["state"], payload["revision"])
+                except RecipeStateConflict:
+                    self._json_response(409, {"error": "Recipe state changed; reload before saving"})
+                    return
+                except (ValueError, UnicodeDecodeError):
+                    self._json_response(400, {"error": "Invalid recipe state"})
+                    return
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to save recipe state"})
+                    return
+                self._json_response(200, {"revision": revision})
+                return
             if urlsplit(self.path).path != "/api/shopping-list":
                 self._json_response(404, {"error": "Not found"})
                 return
@@ -323,7 +364,7 @@ def main() -> None:
     load_dotenv(root / ".env")
     factory = create_session_factory()
     report_path = root / "lizapanelim_posts.html"
-    _render_reports(report_path, load_posts(factory, reverse=False))
+    _render_reports(report_path, _load_report_posts(report_path.parent, factory))
     if args.reload:
         threading.Thread(
             target=_watch_and_render,

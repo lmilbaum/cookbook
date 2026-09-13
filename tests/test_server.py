@@ -238,3 +238,31 @@ def test_reload_retries_database_failure_and_only_renders_changes(tmp_path, monk
         server._watch_and_render(tmp_path / "report.html", None)
     assert rendered == [[], ["changed"]]
     assert "secret" not in capsys.readouterr().out
+
+
+def test_report_order_honors_config_and_reload_changes(tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from cookbook.database import Base
+    from cookbook.models import PostItem
+    from cookbook.post_repository import insert_missing_posts
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    posts = [PostItem(
+        shortcode=name, url="", image_url="", caption="",
+        timestamp_utc=date, likes=0, comments=0, typename="GraphImage", is_video=False,
+    ) for name, date in [("newest", "2026-02-01"), ("oldest", "2026-01-01")]]
+    insert_missing_posts(factory, posts)
+
+    def order():
+        return [post.shortcode for post in server._load_report_posts(tmp_path, factory)]
+
+    assert order() == ["newest", "oldest"]
+    config = tmp_path / "cookbook.toml"
+    config.write_text('username = "example"\nreverse = true\n')
+    assert order() == ["oldest", "newest"]
+    config.write_text('username = "example"\nreverse = false\n')
+    assert order() == ["newest", "oldest"]
+    engine.dispose()

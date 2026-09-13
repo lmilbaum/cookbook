@@ -41,6 +41,88 @@ def _title_for_post(post: PostItem, titles: dict[str, str]) -> str:
     return caption_lines[0] if caption_lines else ""
 
 
+_RECIPE_STATE_SCRIPT = r"""
+        const persistenceStatus = document.createElement("p");
+        persistenceStatus.setAttribute("role", "status");
+        persistenceStatus.hidden = true;
+        document.querySelector("main").prepend(persistenceStatus);
+        const hosted = location.protocol.startsWith("http");
+        let revision = 0;
+        let blocked = false;
+        let pendingSave = Promise.resolve();
+        const backupKey = `${storageKey}-backup-${Date.now()}`;
+        const persistSnapshot = async (snapshot) => {
+          if (blocked) throw new Error("Reload before saving again. Your browser backup is retained.");
+          const response = await fetch("/api/recipe-state", {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ state: snapshot, revision }),
+          });
+          if (!response.ok) {
+            blocked = true;
+            throw new Error(response.status === 409
+              ? "Recipes changed in another tab. Reload before saving. Your browser backup is retained."
+              : "Database save failed. Your browser backup is retained. Reload to retry.");
+          }
+          revision = (await response.json()).revision;
+        };
+        if (hosted) {
+          try {
+            const response = await fetch("/api/recipe-state", { cache: "no-store" });
+            if (!response.ok) throw new Error();
+            const persisted = await response.json();
+            revision = persisted.revision;
+            if (revision === 0 && (Object.keys(state.overrides).length || state.custom.length)) {
+              await persistSnapshot(state);
+            } else {
+              state = persisted.state;
+            }
+          } catch {
+            persistenceStatus.hidden = false;
+            persistenceStatus.textContent = "Unable to load recipes. Reload to retry; browser data is retained.";
+            document.querySelectorAll("button, input, textarea, select").forEach((control) => control.disabled = true);
+            return;
+          }
+        }
+        const statusVersions = new WeakMap();
+        const showSaveStatus = (target, message, temporary = false) => {
+          clearTimeout(target.saveTimer);
+          target.textContent = message;
+          if (temporary) target.saveTimer = setTimeout(() => { target.textContent = ""; }, 2000);
+        };
+        const save = (target) => {
+          const version = (statusVersions.get(target) || 0) + 1;
+          statusVersions.set(target, version);
+          const report = (message, temporary = false) => {
+            if (statusVersions.get(target) === version) showSaveStatus(target, message, temporary);
+          };
+          const snapshot = JSON.parse(JSON.stringify(state));
+          let backupSaved = true;
+          try {
+            localStorage.setItem(hosted ? backupKey : storageKey, JSON.stringify(snapshot));
+          } catch {
+            backupSaved = false;
+          }
+          if (!hosted) {
+            report(backupSaved ? "Saved." : "Unable to save in this browser.", backupSaved);
+            return Promise.resolve(backupSaved);
+          }
+          report("Saving…");
+          pendingSave = pendingSave.then(async () => {
+            try {
+              await persistSnapshot(snapshot);
+              report("Saved.", true);
+              return true;
+            } catch (error) {
+              blocked = true;
+              report(backupSaved ? error.message : "Save failed and browser backup is unavailable. Keep this page open and copy your edits.");
+              return false;
+            }
+          });
+          return pendingSave;
+        };
+"""
+
+
 def render_html(
     posts: list[PostItem],
     username: str,
@@ -265,7 +347,7 @@ def render_html(
       </form>
     </dialog>
     <script>
-      (() => {{
+      (async () => {{
         const storageKey = "cookbook-recipe-changes-v1";
         const scrollStorageKey = "cookbook-main-scroll-position";
         const baseRecipes = {base_recipes_json};
@@ -291,6 +373,7 @@ def render_html(
         if (!state || typeof state !== "object") state = {{ overrides: {{}}, custom: [] }};
         state.overrides ||= {{}};
         state.custom ||= [];
+        {_RECIPE_STATE_SCRIPT}
         const allRecipes = () => baseRecipes
           .map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}), recipeName: state.overrides[recipe.id]?.recipeName || recipe.recipeName }}))
           .concat(state.custom);
@@ -310,7 +393,6 @@ def render_html(
         let sourceIndex = 0;
         state.order = state.order.map((id) => baseIds.has(id) ? sourceOrder[sourceIndex++] : id);
 
-        const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
         const safeLink = (value) => {{
           if (!value) return "";
           try {{
@@ -427,7 +509,7 @@ def render_html(
         }};
         const createCard = (recipe) => {{
           const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id; card.id = `recipe-${{encodeURIComponent(recipe.id)}}`;
-          card.innerHTML = '<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2><div class="card-meta" aria-label="קישורים למתכון"><span class="meta-label">מקור</span><p class="link-row source-link"></p><span class="meta-label">מתכונים</span><div class="recipe-links"></div></div></header><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a></div><section class="recipe-ingredients"><h3>מצרכים</h3><table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th></tr></thead><tbody></tbody></table></section><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><section class="recipe-notes"><h3>הערות</h3><textarea aria-label="הערות למתכון"></textarea><p class="recipe-notes-status" aria-live="polite"></p></section><button class="edit-recipe" type="button">עריכת המתכון</button><div class="card-image"></div>';
+          card.innerHTML = '<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2><div class="card-meta" aria-label="קישורים למתכון"><span class="meta-label">מקור</span><p class="link-row source-link"></p><span class="meta-label">מתכונים</span><div class="recipe-links"></div></div></header><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a><span class="prerequisite-status" aria-live="polite"></span></div><section class="recipe-ingredients"><h3>מצרכים</h3><table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th></tr></thead><tbody></tbody></table></section><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><section class="recipe-notes"><h3>הערות</h3><textarea aria-label="הערות למתכון"></textarea><p class="recipe-notes-status" aria-live="polite"></p></section><button class="edit-recipe" type="button">עריכת המתכון</button><div class="card-image"></div>';
           updateCard(card, recipe); return card;
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
@@ -443,7 +525,6 @@ def render_html(
         }};
         const recipesById = new Map(allRecipes().map((recipe) => [recipe.id, recipe]));
         state.order.forEach((id) => grid.append(createCard(recipesById.get(id))));
-        save();
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
         if (selectedRecipeId) {{
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{ card.hidden = card.dataset.recipeId !== selectedRecipeId; }});
@@ -472,7 +553,7 @@ def render_html(
           card.dataset.recipe = JSON.stringify(recipe);
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
-          save(); card.querySelector(".recipe-notes-status").textContent = "נשמר אוטומטית";
+          save(card.querySelector(".recipe-notes-status"));
         }});
         grid.addEventListener("change", (event) => {{
           const select = event.target.closest(".recipe-prerequisite select"); if (!select) return;
@@ -480,13 +561,13 @@ def render_html(
           const recipe = {{ ...recipeFromCard(card), prerequisiteId: select.value }};
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
-          save(); updateCard(card, recipe);
+          save(card.querySelector(".prerequisite-status")); updateCard(card, recipe);
         }});
         grid.addEventListener("click", (event) => {{
           const button = event.target.closest(".edit-recipe"); if (!button) return;
           const card = button.closest("[data-recipe-id]"); openEditor(recipeFromCard(card), !baseIds.has(card.dataset.recipeId));
         }});
-        form.addEventListener("submit", (event) => {{
+        form.addEventListener("submit", async (event) => {{
           event.preventDefault();
           const existingId = idInput.value;
           const previous = existingId ? recipeFromCard(grid.querySelector(`[data-recipe-id="${{CSS.escape(existingId)}}"]`)) : {{}};
@@ -520,14 +601,14 @@ def render_html(
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
           if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
-          save(); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.append(createCard(recipe));
+          const saved = save(saveStatus); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.append(createCard(recipe));
           grid.querySelectorAll("[data-recipe-id]").forEach((recipeCard) => updateCard(recipeCard, recipeFromCard(recipeCard)));
-          saveStatus.textContent = "נשמר בדפדפן.";
+          if (!await saved) return;
           if (!selectedRecipeId) setTimeout(() => dialog.close(), 350);
         }});
-        deleteButton.addEventListener("click", () => {{
+        deleteButton.addEventListener("click", async () => {{
           const id = idInput.value; if (!id || baseIds.has(id)) return;
-          state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); save(); grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
+          state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); if (!await save(saveStatus)) return; grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
           if (selectedRecipeId) window.location.href = "lizapanelim_posts.html";
           else dialog.close();
@@ -540,7 +621,7 @@ def render_html(
 
 
 def render_notes_html(posts: list[PostItem], favicon_href: str) -> str:
-    """Render recipe notes on their own page, sharing cookbook local storage."""
+    """Render recipe notes on their own page, sharing cookbook database state."""
 
     base_recipes = [
         {
@@ -579,18 +660,20 @@ def render_notes_html(posts: list[PostItem], favicon_href: str) -> str:
     <main>
       <a href="lizapanelim_posts.html">Back to cookbook</a>
       <h1 id="page-title">Recipe notes</h1>
-      <p class="intro" id="intro">This note is saved automatically in this browser.</p>
+      <p class="intro" id="intro">Notes are saved automatically.</p>
       <section class="notes-grid" id="notes-grid"></section>
     </main>
     <script>
-      (() => {{
+      (async () => {{
         const storageKey = "cookbook-recipe-changes-v1";
         const baseRecipes = {recipes_json};
         let state;
         try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
         catch {{ state = {{ overrides: {{}}, custom: [] }}; }}
+        if (!state || typeof state !== "object") state = {{ overrides: {{}}, custom: [] }};
         state.overrides ||= {{}};
         state.custom ||= [];
+        {_RECIPE_STATE_SCRIPT}
         const recipes = baseRecipes.map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}) }})).concat(state.custom);
         const grid = document.getElementById("notes-grid");
         const recipeId = new URLSearchParams(window.location.search).get("id");
@@ -613,9 +696,7 @@ def render_notes_html(posts: list[PostItem], favicon_href: str) -> str:
             const customIndex = state.custom.findIndex((item) => item.id === recipe.id);
             if (customIndex >= 0) state.custom[customIndex] = {{ ...state.custom[customIndex], notes: recipe.notes }};
             else state.overrides[recipe.id] = {{ ...recipe }};
-            localStorage.setItem(storageKey, JSON.stringify(state));
-            status.textContent = "Saved."; clearTimeout(input.saveTimer);
-            input.saveTimer = setTimeout(() => {{ status.textContent = ""; }}, 1000);
+            save(status);
           }});
           card.append(title, input, status); grid.append(card);
         }}
@@ -752,7 +833,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
           countElement.textContent = `${{items.length}} item${{items.length === 1 ? "" : "s"}}`;
           trelloButton.disabled = items.length === 0;
         }};
-        form.addEventListener("submit", (event) => {{
+        form.addEventListener("submit", async (event) => {{
           event.preventDefault();
           const name = input.value.trim();
           if (!name) return;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -68,3 +69,13 @@ class PostItem:  # pylint: disable=too-many-instance-attributes
     recipe_url: str = ""
     recipe_urls: list[str] = field(default_factory=list)
     recipe_names: list[str] = field(default_factory=list)
+
+
+class RecipeState(Base):
+    """Shared recipe overrides and custom recipes in the browser's format."""
+
+    __tablename__ = "recipe_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
