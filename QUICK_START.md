@@ -1,166 +1,55 @@
-#!/usr/bin/env bash
-# Quick reference for Instagram scraper methods
+# Quick start
 
-cat << 'EOF'
+Requires Docker Compose and Python 3.11+ with `uv`.
 
-╔════════════════════════════════════════════════════════════════════════════╗
-║         Instagram Scraper - Quick Reference Guide                         ║
-╚════════════════════════════════════════════════════════════════════════════╝
+```sh
+uv sync
+make up
+```
 
-┌─ CURRENT STATUS ────────────────────────────────────────────────────────────┐
-│                                                                              │
-│  Active Configuration (cookbook.toml):  use_browser = false               │
-│  Current Method:                        API-based (Instaloader)           │
-│  Rate Limited:                          YES (401 "Please wait...")         │
-│                                                                              │
-│  Available Alternative:                 Browser-based (Playwright)         │
-│  Status:                               Ready to use                        │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+Open http://localhost:8765/lizapanelim_posts.html. Compose starts PostgreSQL,
+applies schema migrations, and serves database-backed cookbook pages.
+`make down` stops the services and retains the database volume.
 
-┌─ METHOD 1: API-BASED SCRAPER (Instaloader) ─────────────────────────────────┐
-│                                                                              │
-│  USE WHEN:                                                                 │
-│  • Instagram API is responding normally                                    │
-│  • You want fast performance                                               │
-│  • You have valid credentials                                              │
-│                                                                              │
-│  CONFIGURATION:                                                            │
-│    cookbook.toml:                                                          │
-│      use_browser = false                                                   │
-│                                                                              │
-│  COMMAND:                                                                  │
-│    $ uv run cookbook --config cookbook.toml                                │
-│                                                                              │
-│  PROS:                                                                     │
-│    ✓ Fast (1-2 seconds per post)                                           │
-│    ✓ Efficient (low resource usage)                                        │
-│    ✓ Session support (login once, reuse)                                   │
-│    ✓ Retry/backoff built-in                                                │
-│                                                                              │
-│  CONS:                                                                     │
-│    ✗ Subject to Instagram API rate limiting                                │
-│    ✗ Currently rate-limited on this account                                │
-│    ✗ Requires authentication                                               │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+## Import existing data
 
-┌─ METHOD 2: BROWSER-BASED SCRAPER (Playwright) ──────────────────────────────┐
-│                                                                              │
-│  USE WHEN:                                                                 │
-│  • API is rate-limited (current situation!)                                │
-│  • You need to bypass anti-scraping measures                               │
-│  • Scraping public profiles                                                │
-│                                                                              │
-│  CONFIGURATION:                                                            │
-│    cookbook.toml:                                                          │
-│      use_browser = true                                                    │
-│                                                                              │
-│  SETUP (first time only):                                                  │
-│    $ uv sync                              # Install playwright             │
-│    $ uv run playwright install chromium   # Download browser               │
-│                                                                              │
-│  COMMAND:                                                                  │
-│    $ uv run cookbook --config cookbook.toml                                │
-│                                                                              │
-│  PROS:                                                                     │
-│    ✓ Bypasses API rate limiting completely                                 │
-│    ✓ Works like a real user (harder to block)                              │
-│    ✓ Can scrape public profiles without auth                               │
-│    ✓ More resilient to Instagram changes                                   │
-│                                                                              │
-│  CONS:                                                                     │
-│    ✗ Slower (5-30 seconds per post)                                        │
-│    ✗ Higher resource usage (browser process)                               │
-│    ✗ Login detection may fail (Instagram blocklists)                       │
-│    ✗ Requires Playwright installation                                      │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+Back up PostgreSQL and export browser-only edits before switching. See the
+[README](README.md) for backup and migration details. Configure `DATABASE_URL`
+in `.env` for host commands, matching the Compose database settings.
 
-┌─ SWITCHING BETWEEN METHODS ─────────────────────────────────────────────────┐
-│                                                                              │
-│  STEP 1: Edit cookbook.toml                                               │
-│    $ nano cookbook.toml                                                    │
-│                                                                              │
-│  STEP 2: Change the use_browser line:                                     │
-│                                                                              │
-│    For API-based:      use_browser = false                                 │
-│    For Browser-based:  use_browser = true                                  │
-│                                                                              │
-│  STEP 3: Save and run:                                                    │
-│    $ uv run cookbook --config cookbook.toml                                │
-│                                                                              │
-│  TIP: Adjust other settings as needed:                                    │
-│    • limit: Number of posts to fetch                                       │
-│    • reverse: Sort chronologically (oldest first)                          │
-│    • login_user: Username for authentication                               │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+```sh
+uv run cookbook-import-post-store --store lizapanelim_posts_items
+# Optional separate legacy titles:
+uv run cookbook-import-post-store --store lizapanelim_posts_items --titles lizapanelim_posts_titles.json
+uv run cookbook-import-shopping-list --file shopping_list.json
+uv run cookbook-import-recipe-state --file recipe-state.json
+```
 
-┌─ RECOMMENDED WORKFLOW ──────────────────────────────────────────────────────┐
-│                                                                              │
-│  1. Try API-based first (fast, efficient):                                 │
-│     Set use_browser = false                                                │
-│                                                                              │
-│  2. If you get rate-limited (401 error):                                   │
-│     Switch to browser-based: use_browser = true                            │
-│                                                                              │
-│  3. If browser scraper has issues:                                         │
-│     • Clear cache: rm -rf ~/.ms-playwright                                 │
-│     • Check Instagram login selectors                                      │
-│     • Try public profile without authentication                            │
-│                                                                              │
-│  4. Monitor rate limits:                                                   │
-│     • API typically resets after 15-30 minutes                             │
-│     • Browser has no limits (rate-limit-free!)                             │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+Post imports preserve existing database edits. Shopping-list and recipe-state
+imports refuse initialized storage; do not reset it to force an import. Source
+files are retained. Refresh open browser tabs after an application upgrade.
 
-┌─ TROUBLESHOOTING ───────────────────────────────────────────────────────────┐
-│                                                                              │
-│  ERROR: "401 Unauthorized - Please wait..."                                │
-│  → Instagram API rate limit. Switch to browser scraper (use_browser=true)  │
-│                                                                              │
-│  ERROR: "No posts found on profile"                                        │
-│  → Profile is private or posts disabled                                    │
-│  → Instagram detected automation, temporarily blocked                      │
-│  → Try: rm -rf ~/.ms-playwright && uv run playwright install chromium     │
-│                                                                              │
-│  ERROR: "Could not find username field"                                    │
-│  → Instagram login page changed                                            │
-│  → Workaround: Scrape without authentication (public profiles only)        │
-│                                                                              │
-│  ERROR: Slow performance                                                   │
-│  → Browser scraper is slower by design                                     │
-│  → Reduce limit in config: limit = 1                                       │
-│  → Or switch to API-based if rate limits allow                             │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+## Fetch new posts
 
-┌─ CONFIGURATION EXAMPLES ────────────────────────────────────────────────────┐
-│                                                                              │
-│  Fast API scraping (when not rate-limited):                                │
-│  ┌─────────────────────────────────────────┐                               │
-│  │ use_browser = false                     │                               │
-│  │ limit = 10                              │                               │
-│  │ request_delay_seconds = 1.5             │                               │
-│  └─────────────────────────────────────────┘                               │
-│                                                                              │
-│  Slow but reliable browser scraping:                                       │
-│  ┌─────────────────────────────────────────┐                               │
-│  │ use_browser = true                      │                               │
-│  │ limit = 5                               │                               │
-│  │ login_user = ""  # optional             │                               │
-│  └─────────────────────────────────────────┘                               │
-│                                                                              │
-│  Maximum wait for rate-limited API:                                        │
-│  ┌─────────────────────────────────────────┐                               │
-│  │ use_browser = false                     │                               │
-│  │ max_fetch_attempts = 8                  │                               │
-│  │ retry_wait_seconds = 600  # 10 minutes  │                               │
-│  └─────────────────────────────────────────┘                               │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+Configure `cookbook.toml` and local Instagram credentials in `.env`.
 
-EOF
-EOF
+```sh
+uv run playwright install chromium
+uv run cookbook --config cookbook.toml --no-open
+```
+
+Set `use_browser = true` to use Playwright directly. Otherwise the importer tries
+the API and falls back to the browser on unauthorized responses. See
+[BROWSER_SCRAPER.md](BROWSER_SCRAPER.md) for scraper setup. View new posts through
+the hosted cookbook to use shared database edits; opening exported HTML through
+`file://` uses browser-only edits.
+
+## Verify changes
+
+```sh
+uv run pytest
+git diff --check
+docker compose exec -T -e PYTHONPATH=/data/src app python /data/scripts/verify_postgres_migration.py
+```
+
+The PostgreSQL check uses synthetic data in a disposable schema.

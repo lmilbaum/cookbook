@@ -63,3 +63,28 @@ def test_import_post_store_does_not_overwrite_an_existing_row(tmp_path) -> None:
     assert import_post_store(store, factory) == 0
     with factory() as session:
         assert session.get(Post, "cake").title == "Database title"
+
+
+def test_legacy_titles_fill_blanks_without_overwriting_edits(tmp_path):
+    from cookbook.post_repository import insert_missing_posts
+    store = tmp_path / "items"
+    store.mkdir()
+    titles = tmp_path / "titles.json"
+    original = json.dumps({"blank": "Legacy title", "edited": "Old title", "new": "New title"})
+    titles.write_text(original)
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    blank, edited = _post("blank"), _post("edited")
+    blank.title = ""
+    edited.title = "Database edit"
+    insert_missing_posts(factory, [blank, edited])
+    (store / "new.json").write_text(json.dumps(asdict(_post("new"))))
+    assert import_post_store(store, factory, titles) == 1
+    assert import_post_store(store, factory, titles) == 0
+    with factory() as session:
+        assert session.get(Post, "blank").title == "Legacy title"
+        assert session.get(Post, "edited").title == "Database edit"
+        assert session.get(Post, "new").title == "New title"
+    assert titles.read_text() == original
+    engine.dispose()

@@ -17,3 +17,6 @@ notes.html
 *_posts_assets/
 *_posts_items/
 recipes/assets/
+*_titles.json
+recipe-state*.json
+.private-backups/

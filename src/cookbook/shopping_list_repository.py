@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import session_scope
-from .models import Ingredient, ShoppingListItem
+from .models import Ingredient, ShoppingListItem, ShoppingListState
 
 
 class ShoppingItem(TypedDict):
@@ -38,16 +38,40 @@ def load_shopping_list(factory: sessionmaker[Session]) -> list[ShoppingItem]:
         return items
 
 
-def save_shopping_list(
-    factory: sessionmaker[Session], items: list[ShoppingItem]
-) -> None:
-    """Atomically replace the list, reusing ingredients by their exact names."""
+class ShoppingListConflict(ValueError):
+    """A stale client tried to replace the shared list."""
 
+
+def load_shopping_state(factory: sessionmaker[Session]) -> dict[str, int | list[ShoppingItem]]:
+    """Read items and revision in one consistent transaction."""
     with session_scope(factory) as session:
-        # Serialize whole-list replacements, including the first save.
         if session.get_bind().dialect.name == "postgresql":
-            session.execute(text("LOCK TABLE ingredients, shopping_list IN EXCLUSIVE MODE"))
+            session.execute(text("LOCK TABLE shopping_list_state, ingredients, shopping_list IN SHARE MODE"))
+        row = session.get(ShoppingListState, 1)
+        # Bind the existing reader to this transaction.
+        items = load_shopping_list(sessionmaker(bind=session.connection()))
+        return {"items": items, "revision": row.revision if row else 0}
+
+
+def save_shopping_list(
+    factory: sessionmaker[Session], items: list[ShoppingItem], revision: int | None = None
+) -> int:
+    """Atomically replace a list; optionally require the client's revision."""
+    if revision is not None and (type(revision) is not int or revision < 0):
+        raise ValueError("Invalid revision")
+    with session_scope(factory) as session:
+        if session.get_bind().dialect.name == "postgresql":
+            session.execute(text("LOCK TABLE shopping_list_state, ingredients, shopping_list IN EXCLUSIVE MODE"))
+        row = session.get(ShoppingListState, 1)
+        current = row.revision if row else 0
+        if revision is not None and revision != current:
+            raise ShoppingListConflict("Shopping list changed; reload before saving")
         _replace_items(session, items)
+        if row is None:
+            session.add(ShoppingListState(id=1, revision=current + 1))
+        else:
+            row.revision += 1
+    return current + 1
 
 
 def _replace_items(session: Session, items: list[ShoppingItem]) -> None:
@@ -93,7 +117,8 @@ def import_shopping_list(factory: sessionmaker[Session], items: list[ShoppingIte
 
     with session_scope(factory) as session:
         if session.get_bind().dialect.name == "postgresql":
-            session.execute(text("LOCK TABLE ingredients, shopping_list IN EXCLUSIVE MODE"))
-        if session.scalar(select(Ingredient.id).limit(1)) is not None:
+            session.execute(text("LOCK TABLE shopping_list_state, ingredients, shopping_list IN EXCLUSIVE MODE"))
+        if session.get(ShoppingListState, 1) is not None or session.scalar(select(Ingredient.id).limit(1)) is not None:
             raise ValueError("Shopping-list storage is already in use; import refused.")
         _replace_items(session, items)
+        session.add(ShoppingListState(id=1, revision=1))

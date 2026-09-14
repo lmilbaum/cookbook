@@ -8,7 +8,7 @@ from dataclasses import asdict
 from cookbook.config import AppConfig
 from cookbook.main import _fetch_posts_with_fallback
 
-from cookbook.main import _load_post_store
+from cookbook.post_store_import import load_post_store
 from cookbook.models import PostItem
 
 
@@ -26,7 +26,7 @@ def _post(shortcode: str, timestamp: str) -> PostItem:
     )
 
 
-def test_load_post_store_uses_configured_chronological_order(tmp_path) -> None:
+def test_load_post_store_reads_complete_posts(tmp_path) -> None:
     store = tmp_path / "items"
     store.mkdir()
     newest = _post("alphabetically-first", "2026-01-02T00:00:00+00:00")
@@ -36,14 +36,7 @@ def test_load_post_store_uses_configured_chronological_order(tmp_path) -> None:
             json.dumps(asdict(post)), encoding="utf-8"
         )
 
-    assert [post.shortcode for post in _load_post_store(store, reverse=True)] == [
-        oldest.shortcode,
-        newest.shortcode,
-    ]
-    assert [post.shortcode for post in _load_post_store(store, reverse=False)] == [
-        newest.shortcode,
-        oldest.shortcode,
-    ]
+    assert load_post_store(store) == [newest, oldest]
 
 
 def test_configured_browser_scraper_is_used_without_calling_the_api(monkeypatch) -> None:

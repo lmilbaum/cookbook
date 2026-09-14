@@ -764,7 +764,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
       </section>
     </main>
     <script>
-      (() => {{
+      (async () => {{
         const storageKey = "cookbook-shopping-list";
         const form = document.getElementById("shopping-form");
         const input = document.getElementById("shopping-item-input");
@@ -783,32 +783,59 @@ def render_shopping_list_html(favicon_href: str) -> str:
           }}
           if (suffix) exportStatus.append(suffix);
         }};
-        let items = JSON.parse(localStorage.getItem(storageKey) || "[]");
+        const hosted = location.protocol.startsWith("http");
+        const backupKey = `${{storageKey}}-backup-${{Date.now()}}`;
+        let items = [];
+        try {{ items = JSON.parse(localStorage.getItem(storageKey) || "[]"); }} catch {{}}
+        if (!Array.isArray(items)) items = [];
+        let revision = 0;
+        let blocked = false;
+        let pendingSave = Promise.resolve();
         const save = () => {{
-          localStorage.setItem(storageKey, JSON.stringify(items));
-          if (location.protocol.startsWith("http")) fetch("/api/shopping-list", {{
-            method: "PUT",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify(items),
-          }}).then((response) => {{ if (!response.ok) throw new Error("Unable to save shopping list"); }}).catch(() => {{ exportStatus.textContent = "השמירה לשרת נכשלה; הרשימה נשמרה בדפדפן בלבד."; }});
-        }};
-        const loadPersistedItems = async () => {{
-          if (!location.protocol.startsWith("http")) return;
-          try {{
-            const response = await fetch("/api/shopping-list");
-            if (!response.ok) throw new Error("Unable to load shopping list");
-            const persistedItems = await response.json();
-            if (Array.isArray(persistedItems)) {{
-              items = persistedItems;
-              localStorage.setItem(storageKey, JSON.stringify(items));
-              render();
-            }} else if (items.length) {{
-              save();
-            }}
-          }} catch (error) {{
-            exportStatus.textContent = "לא ניתן לטעון את הרשימה מהשרת; מוצגת הרשימה השמורה בדפדפן.";
+          const snapshot = JSON.parse(JSON.stringify(items));
+          let backupSaved = true;
+          try {{ localStorage.setItem(hosted ? backupKey : storageKey, JSON.stringify(snapshot)); }}
+          catch {{ backupSaved = false; }}
+          if (!hosted) {{
+            exportStatus.textContent = backupSaved ? "Saved." : "Browser save failed. Keep this page open and copy your list.";
+            return;
           }}
+          exportStatus.textContent = "Saving…";
+          pendingSave = pendingSave.then(async () => {{
+            try {{
+              if (blocked) throw new Error("Reload before saving again; your browser backup is retained.");
+              const response = await fetch("/api/shopping-list", {{
+                method: "PUT", headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ items: snapshot, revision }}),
+              }});
+              if (!response.ok) throw new Error(response.status === 409
+                ? "Shopping list changed in another tab. Reload before saving; your browser backup is retained."
+                : "Database save failed. Reload to retry; your browser backup is retained.");
+              revision = (await response.json()).revision;
+              exportStatus.textContent = "Saved.";
+            }} catch (error) {{
+              blocked = true;
+              exportStatus.textContent = backupSaved ? error.message
+                : "Save failed and browser backup is unavailable. Keep this page open and copy your list.";
+            }}
+          }});
         }};
+        if (hosted) {{
+          document.querySelectorAll("button, input").forEach((control) => control.disabled = true);
+          try {{
+            const response = await fetch("/api/shopping-list", {{ cache: "no-store" }});
+            if (!response.ok) throw new Error();
+            const persisted = await response.json();
+            if (!Array.isArray(persisted.items) || !Number.isInteger(persisted.revision)) throw new Error();
+            items = persisted.items;
+            revision = persisted.revision;
+            document.querySelectorAll("button, input").forEach((control) => control.disabled = false);
+          }} catch {{
+            exportStatus.textContent = "Unable to load shopping list. Reload to retry; browser data is retained.";
+            document.querySelectorAll("button, input").forEach((control) => control.disabled = true);
+            return;
+          }}
+        }}
         const render = () => {{
           itemsElement.replaceChildren();
           [...items].sort((a, b) => a.name.localeCompare(b.name, "he")).forEach((item) => {{
@@ -872,7 +899,6 @@ def render_shopping_list_html(favicon_href: str) -> str:
           }}
         }});
         render();
-        loadPersistedItems();
       }})();
     </script>
   </body>

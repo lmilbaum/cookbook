@@ -63,12 +63,16 @@ def load_posts(factory: sessionmaker[Session], reverse: bool) -> list[PostItem]:
 
 
 def insert_missing_posts(
-    factory: sessionmaker[Session], items: Iterable[PostItem]
+    factory: sessionmaker[Session], items: Iterable[PostItem], titles: dict[str, str] | None = None
 ) -> int:
     """Insert new scraper results without replacing existing database rows."""
 
     inserted = 0
     with session_scope(factory) as session:
+        for shortcode, title in (titles or {}).items():
+            post = session.get(Post, shortcode)
+            if post is not None and not post.title.strip() and title.strip():
+                post.title = title.strip()
         for item in items:
             if session.get(Post, item.shortcode) is not None:
                 continue

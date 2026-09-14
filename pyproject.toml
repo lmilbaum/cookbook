@@ -18,6 +18,7 @@ cookbook-server = "cookbook.server:main"
 cookbook-import-post-store = "cookbook.post_store_import:main"
 
 cookbook-import-shopping-list = "cookbook.shopping_list_import:main"
+cookbook-import-recipe-state = "cookbook.recipe_state_import:main"
 
 [build-system]
 requires = ["hatchling"]

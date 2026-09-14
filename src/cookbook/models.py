@@ -54,7 +54,7 @@ class Post(Base):
 
 @dataclass
 class PostItem:  # pylint: disable=too-many-instance-attributes
-    """Temporary JSON-store representation used during the database migration."""
+    """Transfer representation shared by scrapers, imports, and report rendering."""
 
     shortcode: str
     url: str
@@ -79,3 +79,12 @@ class RecipeState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     revision: Mapped[int] = mapped_column(Integer)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
+class ShoppingListState(Base):
+    """Revision and durable initialization marker for the shared list."""
+
+    __tablename__ = "shopping_list_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer)

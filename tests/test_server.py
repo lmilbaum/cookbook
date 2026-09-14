@@ -137,26 +137,27 @@ def test_database_shopping_api(tmp_path, monkeypatch) -> None:
     legacy = tmp_path / "shopping_list.json"
     legacy.write_text("legacy file remains untouched")
     handler.do_GET()
-    assert responses.pop() == (200, [])
+    assert responses.pop() == (200, {"items": [], "revision": 0})
 
-    def put(payload):
-        body = json.dumps(payload).encode()
+    def put(payload, revision=0):
+        body = json.dumps({"items": payload, "revision": revision}).encode()
         handler.headers = {"Content-Length": str(len(body))}
         handler.rfile = io.BytesIO(body)
         handler.do_PUT()
         return responses.pop()
 
     items = [{"id": "a", "name": "Milk", "done": False, "quantity": "2"}]
-    assert put(items) == (200, {"saved": True})
+    assert put(items) == (200, {"revision": 1})
     handler.do_GET()
-    assert responses.pop() == (200, items)
+    assert responses.pop() == (200, {"items": items, "revision": 1})
     assert put(items * 2)[0] == 400
     assert put([{**items[0], "quantity": 2}])[0] == 400
     handler.do_GET()
-    assert responses.pop() == (200, items)
-    assert put([])[0] == 200
+    assert responses.pop() == (200, {"items": items, "revision": 1})
+    assert put(items)[0] == 409
+    assert put([], 1)[0] == 200
     handler.do_GET()
-    assert responses.pop() == (200, [])
+    assert responses.pop() == (200, {"items": [], "revision": 2})
     assert legacy.read_text() == "legacy file remains untouched"
 
     def unavailable(*args):
@@ -164,7 +165,7 @@ def test_database_shopping_api(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(server, "save_shopping_list", unavailable)
     assert put(items) == (503, {"error": "Unable to save shopping list"})
-    monkeypatch.setattr(server, "load_shopping_list", unavailable)
+    monkeypatch.setattr(server, "load_shopping_state", unavailable)
     handler.do_GET()
     assert responses.pop() == (503, {"error": "Unable to read shopping list"})
     engine.dispose()
@@ -266,3 +267,39 @@ def test_report_order_honors_config_and_reload_changes(tmp_path):
     config.write_text('username = "example"\nreverse = false\n')
     assert order() == ["newest", "oldest"]
     engine.dispose()
+
+
+def test_static_serving_blocks_local_data_and_backups(tmp_path):
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+    import pytest
+
+    (tmp_path / 'lizapanelim_posts.html').write_text('Cookbook')
+    (tmp_path / '.env').write_text('private fixture')
+    backups = tmp_path / '.private-backups'
+    backups.mkdir()
+    (backups / 'backup.dump').write_bytes(b'private fixture')
+    assets = tmp_path / 'lizapanelim_posts_assets'
+    assets.mkdir()
+    (assets / 'test.jpg').write_bytes(b'image fixture')
+    (assets / 'secret.jpg').symlink_to(backups / 'backup.dump')
+    http = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(tmp_path, None))
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{http.server_port}'
+    try:
+        with urlopen(base + '/') as response:
+            assert response.read() == b'Cookbook'
+        with urlopen(base + '/lizapanelim_posts_assets/test.jpg') as response:
+            assert response.read() == b'image fixture'
+        for path in ['/.env', '/.private-backups/backup.dump', '/lizapanelim_posts_assets/',
+                     '/lizapanelim_posts_assets/secret.jpg', '/%2eenv']:
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + path)
+            assert error.value.code == 404
+    finally:
+        http.shutdown()
+        http.server_close()
+        thread.join()

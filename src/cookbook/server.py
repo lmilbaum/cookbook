@@ -12,9 +12,9 @@ import webbrowser
 from dataclasses import replace
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
@@ -26,7 +26,7 @@ from .database import create_session_factory
 from .recipe_state_repository import (
     RecipeStateConflict, load_recipe_state, save_recipe_state,
 )
-from .shopping_list_repository import load_shopping_list, save_shopping_list, valid_items
+from .shopping_list_repository import load_shopping_state, save_shopping_list, valid_items, ShoppingListConflict
 
 from .models import PostItem
 from .post_repository import load_posts
@@ -245,11 +245,36 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, directory=str(root), **kwargs)
 
+        def send_head(self) -> BinaryIO | None:
+            """Serve generated pages and images without exposing local data files."""
+            path = unquote(urlsplit(self.path).path)
+            if path == "/":
+                self.send_response(302)
+                self.send_header("Location", "/lizapanelim_posts.html")
+                self.end_headers()
+                return None
+            candidate = (root / path.lstrip("/")).resolve()
+            allowed = False
+            if candidate.is_relative_to(root.resolve()):
+                relative = candidate.relative_to(root.resolve())
+                allowed = relative.as_posix() in {
+                    "lizapanelim_posts.html", "shopping_list.html", "notes.html", "favicon.svg",
+                } or (
+                    candidate.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+                    and (relative.parts[0].endswith("_posts_assets")
+                         or relative.parts[:2] == ("recipes", "assets"))
+                )
+            if not allowed or not candidate.is_file():
+                self.send_error(404, "Not found")
+                return None
+            return super().send_head()
+
         def _json_response(self, status: int, payload: Any) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 
@@ -266,7 +291,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                 super().do_GET()
                 return
             try:
-                items = load_shopping_list(factory)
+                items = load_shopping_state(factory)
             except SQLAlchemyError:
                 self._json_response(503, {"error": "Unable to read shopping list"})
                 return
@@ -304,15 +329,20 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             except (ValueError, json.JSONDecodeError):
                 self._json_response(400, {"error": "Invalid JSON"})
                 return
-            if not _valid_items(items):
+            if (not isinstance(items, dict) or set(items) != {"items", "revision"}
+                or type(items["revision"]) is not int or items["revision"] < 0
+                or not _valid_items(items["items"])):
                 self._json_response(400, {"error": "Invalid shopping list"})
                 return
             try:
-                save_shopping_list(factory, items)
+                revision = save_shopping_list(factory, items["items"], items["revision"])
+            except ShoppingListConflict:
+                self._json_response(409, {"error": "Shopping list changed; reload before saving"})
+                return
             except SQLAlchemyError:
                 self._json_response(503, {"error": "Unable to save shopping list"})
                 return
-            self._json_response(200, {"saved": True})
+            self._json_response(200, {"revision": revision})
 
         def do_POST(self) -> None:
             if urlsplit(self.path).path != "/api/trello/cards":

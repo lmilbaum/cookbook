@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from cookbook.models import Ingredient, ShoppingListItem
+from cookbook.models import Ingredient, ShoppingListItem, ShoppingListState
 from cookbook.shopping_list_repository import ShoppingItem, load_shopping_list, save_shopping_list
 
 
@@ -27,6 +27,7 @@ def test_migration_and_shopping_list_lifecycle() -> None:
         with Operations.context(MigrationContext.configure(connection)):
             migration.upgrade()
 
+    ShoppingListState.__table__.create(engine)
     factory = sessionmaker(bind=engine)
     assert load_shopping_list(factory) == []
     items: list[ShoppingItem] = [
@@ -81,4 +82,22 @@ def test_import_refuses_to_overwrite_or_resurrect_items() -> None:
     with pytest.raises(ValueError, match="already in use"):
         import_shopping_list(factory, items)
     assert load_shopping_list(factory) == []
+    engine.dispose()
+
+
+def test_empty_import_is_initialized_and_stale_saves_fail():
+    from cookbook.database import Base
+    from cookbook.shopping_list_repository import import_shopping_list, load_shopping_state, ShoppingListConflict
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    import_shopping_list(factory, [])
+    assert load_shopping_state(factory) == {"items": [], "revision": 1}
+    with pytest.raises(ValueError, match="already in use"):
+        import_shopping_list(factory, [])
+    with pytest.raises(ShoppingListConflict):
+        save_shopping_list(factory, [], revision=0)
+    assert save_shopping_list(factory, [], revision=1) == 2
+    assert load_shopping_state(factory) == {"items": [], "revision": 2}
     engine.dispose()

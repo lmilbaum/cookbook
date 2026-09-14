@@ -73,7 +73,7 @@ web UI, but those files are not read back as post data.
 The schema also includes `ingredients` (one row per ingredient) and
 `shopping_list` (one row per item, referencing an ingredient, with optional
 quantity and checked status). Shopping items are displayed alphabetically;
-there is no stored position or separate list record. The shopping-list API now
+there is no stored position. A separate revision record protects list updates. The shopping-list API now
 reads and writes PostgreSQL. Before starting the updated server, apply migrations
 and import your existing list once (load `DATABASE_URL` from your environment):
 
@@ -82,11 +82,29 @@ uv run alembic -c pyproject.toml upgrade head
 uv run cookbook-import-shopping-list --file shopping_list.json
 ```
 
-The import retains the JSON file and refuses to run once ingredients exist,
-including after the shopping list has been cleared. Normal server operation
+The import retains the JSON file and refuses to run once list storage is initialized,
+including after an empty import or after the shopping list has been cleared. Normal server operation
 never reads or writes that legacy file. An empty database returns an empty list;
 browser-only lists should be backed up before switching to the database server.
 Database save failures are shown in the UI, with a browser-local backup retained.
+Hosted shopping pages preserve the original browser list and save recovery copies
+under `cookbook-shopping-list-backup-<timestamp>`. They disable editing if the
+initial database read fails. Saves are queued, and a stale tab receives a conflict
+instead of overwriting a newer list. Reload after an error before saving again.
+The shopping API returns `{ "items": [...], "revision": N }`; PUT requires the
+same shape and returns the next revision. Old pages must be refreshed after upgrade.
+
+If legacy titles exist separately, import them explicitly:
+
+```sh
+uv run cookbook-import-post-store --store lizapanelim_posts_items --titles lizapanelim_posts_titles.json
+```
+
+Titles are applied to new posts and fill blank titles on existing posts; existing
+nonblank database titles and recipe overrides remain authoritative. The source
+files are retained. Normal imports no longer use legacy file-storage helpers,
+and report generation retains cached images even in strict window mode.
+
 
 Recipe edits, custom recipes, ingredients entered in recipes, preparation links,
 and notes now share database storage through `/api/recipe-state`. This migration
@@ -97,6 +115,23 @@ On the first visit, an unused database imports recipe changes from that browser'
 containing the edits you want to migrate. Once initialized, the database is the
 source of truth, including after custom recipes are deleted. Other browsers'
 legacy copies are retained but are not automatically merged.
+
+To import a saved browser copy explicitly before opening the hosted cookbook,
+save the JSON value of `cookbook-recipe-changes-v1` (or one of its backup keys)
+from the browser's developer tools under Application/Storage → Local Storage
+to a UTF-8 file. The file must contain the state object with `overrides`,
+`custom`, and optional `order`, without an extra wrapper or surrounding quotes.
+Then run:
+
+```sh
+uv run cookbook-import-recipe-state --file recipe-state.json
+```
+
+The command loads `.env`, validates the entire file before writing, retains
+the source file, and refuses to overwrite any initialized recipe state—even
+an intentionally empty state. Apply pending migrations first. This also lets
+you migrate edits from a `file://` cookbook by exporting its local storage.
+Keep exports and backups local; they contain your recipe edits and notes.
 
 Both cookbook and notes pages save to the database. Save feedback appears beside
 the edited field or form; success clears after two seconds and errors remain
@@ -139,3 +174,28 @@ in `.env` does not update an existing database's credentials.
 The image is pinned to PostgreSQL version 18.6. Its volume is mounted at
 `/var/lib/postgresql`, following the [official image's storage layout](https://hub.docker.com/_/postgres).
 Major-version upgrades require a database migration, not just changing the tag.
+
+## Migration verification and backups
+
+Before updating an existing installation, retain a PostgreSQL backup and browser
+exports. Keep the original post JSON, title files, and cached images until you
+have verified your data. `make up` applies pending migrations automatically.
+
+```sh
+mkdir -p .private-backups
+chmod 700 .private-backups
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > .private-backups/cookbook.dump
+uv run pytest
+# Exercise migrations, concurrency, and reconnect persistence in a disposable schema:
+docker compose exec -T -e PYTHONPATH=/data/src app python /data/scripts/verify_postgres_migration.py
+```
+
+The verification script requires permission to create a schema and drops only its
+own randomly named test schema. Browser tests require Chromium:
+`uv run playwright install chromium`. Test saves never modify the live cookbook.
+To inspect a backup without restoring it, run `pg_restore --list` against it.
+Restore backups into a separate database first, verify the data, then intentionally
+switch `DATABASE_URL`; never restore over the working database as a routine check.
+
+The local web server serves only cookbook pages, the favicon, and cached images.
+Credentials, source JSON, and private backups are not served over HTTP.
