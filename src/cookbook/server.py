@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .config import load_config
 from .database import create_session_factory
+from .import_service import ImportService
 from .recipe_state_repository import (
     RecipeStateConflict, load_recipe_state, save_recipe_state,
 )
@@ -239,6 +240,11 @@ def _create_trello_card(items: list[dict[str, Any]]) -> dict[str, str]:
 def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPRequestHandler]:
     """Create a request handler bound to the cookbook directory and database."""
 
+    imports = ImportService(
+        root,
+        lambda: _render_reports(root / "lizapanelim_posts.html", _load_report_posts(root, factory)),
+    )
+
     class CookbookHandler(SimpleHTTPRequestHandler):
         extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".webp": "image/webp"}
 
@@ -263,6 +269,9 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     candidate.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
                     and (relative.parts[0].endswith("_posts_assets")
                          or relative.parts[:2] == ("recipes", "assets"))
+                ) or (
+                    candidate.suffix.lower() == ".html" and len(relative.parts) == 2
+                    and relative.parts[0] == "recipes"
                 )
             if not allowed or not candidate.is_file():
                 self.send_error(404, "Not found")
@@ -279,6 +288,9 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self.wfile.write(body)
 
         def do_GET(self) -> None:
+            if urlsplit(self.path).path == "/api/import-post":
+                self._json_response(200, imports.status())
+                return
             if urlsplit(self.path).path == "/api/recipe-state":
                 try:
                     payload = load_recipe_state(factory)
@@ -345,6 +357,19 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self._json_response(200, {"revision": revision})
 
         def do_POST(self) -> None:
+            if urlsplit(self.path).path == "/api/import-post":
+                try:
+                    if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                        raise ValueError
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 100 or json.loads(self.rfile.read(length)) != {}:
+                        raise ValueError
+                except ValueError:
+                    self._json_response(400, {"error": "Expected an empty JSON object"})
+                    return
+                started = imports.start()
+                self._json_response(202 if started else 409, imports.status())
+                return
             if urlsplit(self.path).path != "/api/trello/cards":
                 self._json_response(404, {"error": "Not found"})
                 return

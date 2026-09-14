@@ -123,3 +123,17 @@ use_browser = false
 - [ ] Add selective field extraction to speed up browser scraper
 - [ ] Implement retry logic for browser scraper
 - [ ] Add support for Stories and Reels
+
+## Selecting the oldest unseen post
+
+For imports from the feed end, the scraper observes the profile timeline's
+GraphQL responses in the existing browser session. It stores only post codes,
+publication timestamps, and post/reel paths for selection. It ignores other
+connections, including the separate feed loaded alongside the profile, and sorts
+by publication timestamp rather than DOM link order or pinned-post position.
+
+Instagram must explicitly report `has_next_page = false` for the profile
+connection. Missing timestamps, stalled pagination, or a scroll-limit timeout
+abort selection without importing a candidate from an incomplete scan. The
+3,000-item cutoff is removed. Ordinary bulk imports retain their grid collection
+path; the strict timeline selection applies when `feed_position_from_end > 0`.

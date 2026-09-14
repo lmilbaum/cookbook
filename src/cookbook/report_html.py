@@ -123,6 +123,57 @@ _RECIPE_STATE_SCRIPT = r"""
 """
 
 
+_IMPORT_POST_SCRIPT = r"""
+      (() => {
+        const controls = document.getElementById("import-controls");
+        const button = document.getElementById("import-post");
+        const status = document.getElementById("import-status");
+        const refresh = document.getElementById("import-refresh");
+        if (!location.protocol.startsWith("http")) {
+          controls.hidden = true;
+          return;
+        }
+        let timer;
+        const show = (result) => {
+          if (!["idle", "running", "succeeded", "empty", "failed"].includes(result.status)) throw new Error();
+          clearTimeout(timer);
+          button.disabled = result.status === "running";
+          button.setAttribute("aria-busy", String(button.disabled));
+          status.textContent = result.message;
+          refresh.hidden = result.status !== "succeeded";
+          if (button.disabled) timer = setTimeout(check, 2000);
+        };
+        const check = async () => {
+          try {
+            const response = await fetch("/api/import-post", { cache: "no-store" });
+            if (!response.ok) throw new Error();
+            show(await response.json());
+          } catch {
+            button.disabled = true;
+            status.textContent = "Unable to check import status. Reconnecting…";
+            timer = setTimeout(check, 3000);
+          }
+        };
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          refresh.hidden = true;
+          status.textContent = "Starting import…";
+          try {
+            const response = await fetch("/api/import-post", {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+            });
+            if (!response.ok && response.status !== 409) throw new Error();
+            show(await response.json());
+          } catch {
+            // Check whether the server accepted the job; never retry a POST automatically.
+            await check();
+          }
+        });
+        check();
+      })();
+"""
+
+
 def render_html(
     posts: list[PostItem],
     username: str,
@@ -186,6 +237,10 @@ def render_html(
         margin: 0 0 8px;
       }}
       .page-header {{ display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }}
+      .header-actions {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+      .import-feedback {{ margin: 8px 0 16px; }}
+      .import-feedback p {{ margin: 0 0 6px; }}
+      button:disabled {{ opacity: .6; cursor: wait; }}
       .page-header h1 {{ margin: 0; text-align: right; direction: rtl; }}
       .back-to-cookbook {{ display: none; margin-bottom: 14px; text-align: right; direction: rtl; }}
       .recipe-view .back-to-cookbook {{ display: block; }}
@@ -316,7 +371,16 @@ def render_html(
     <main>
       <div class="page-header">
         <h1>ספר המתכונים שלי</h1>
-        <button id="add-recipe" type="button">הוסף מתכון</button>
+        <div class="header-actions">
+          <button id="add-recipe" type="button">הוסף מתכון</button>
+          <div id="import-controls">
+            <button id="import-post" type="button" disabled aria-label="Import next post from the end">ייבוא הפוסט הבא מהסוף</button>
+          </div>
+        </div>
+      </div>
+      <div class="import-feedback">
+        <p id="import-status" role="status" aria-live="polite"></p>
+        <a id="import-refresh" href="lizapanelim_posts.html" hidden>Refresh cookbook</a>
       </div>
       <a class="back-to-cookbook" href="lizapanelim_posts.html">חזרה לכל המתכונים</a>
       <section class=\"grid\" id=\"recipe-grid\"></section>
@@ -615,6 +679,7 @@ def render_html(
         }});
       }})();
     </script>
+    <script>{_IMPORT_POST_SCRIPT}</script>
   </body>
 </html>
 """

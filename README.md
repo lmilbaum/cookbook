@@ -3,6 +3,32 @@
 Python tools for importing recipes and serving a personal cookbook.
 See [QUICK_START.md](QUICK_START.md) for scraper instructions.
 
+## Import the next post from the application
+
+Use **ייבוא הפוסט הבא מהסוף** (Import next post from the end) beside Add recipe
+in the cookbook header. The application runs the existing Instagram browser
+scraper directly—no AI service, chat, or terminal command is involved.
+Each click selects the oldest profile post by its publication timestamp, skipping
+all stored posts, including hidden posts. Only the requested profile timeline is
+used; unrelated feed links and DOM discovery order do not determine selection.
+The browser must receive Instagram's explicit end-of-pagination signal before
+selecting a post. A stalled or incomplete scan imports nothing. The configured profile,
+credentials, and browser session are reused; the report limit does not limit
+these individual imports.
+
+Imports run in the background and may take several minutes while the scraper
+scrolls the profile. The button shows progress and prevents overlapping jobs
+across tabs. After success, use **Refresh cookbook** to see the post; the app
+does not reload the page automatically while you may be editing. Failures and
+an exhausted feed are shown in the page. Jobs time out after 30 minutes. A server
+restart interrupts an active job; refresh the cookbook before retrying.
+
+Compose includes Chromium and its system dependencies. For a host-run server,
+install it with `uv run playwright install chromium`. Instagram credentials must
+already be configured in the local `.env`; login challenges may still require
+restoring a valid session. This button is available only on the hosted cookbook.
+Opening a page never starts an import.
+
 ## Local application environment
 
 Install Make and Docker with the Docker Compose plugin and start the Docker engine

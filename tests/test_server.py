@@ -285,6 +285,13 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
     assets.mkdir()
     (assets / 'test.jpg').write_bytes(b'image fixture')
     (assets / 'secret.jpg').symlink_to(backups / 'backup.dump')
+    recipes = tmp_path / 'recipes'
+    recipes.mkdir()
+    (recipes / 'apple_cake.html').write_text('Apple cake story')
+    (recipes / 'notes.txt').write_text('not html')
+    nested = recipes / 'nested'
+    nested.mkdir()
+    (nested / 'apple_cake.html').write_text('nested story')
     http = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(tmp_path, None))
     thread = threading.Thread(target=http.serve_forever, daemon=True)
     thread.start()
@@ -294,8 +301,11 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
             assert response.read() == b'Cookbook'
         with urlopen(base + '/lizapanelim_posts_assets/test.jpg') as response:
             assert response.read() == b'image fixture'
+        with urlopen(base + '/recipes/apple_cake.html') as response:
+            assert response.read() == b'Apple cake story'
         for path in ['/.env', '/.private-backups/backup.dump', '/lizapanelim_posts_assets/',
-                     '/lizapanelim_posts_assets/secret.jpg', '/%2eenv']:
+                     '/lizapanelim_posts_assets/secret.jpg', '/%2eenv',
+                     '/recipes/notes.txt', '/recipes/nested/apple_cake.html']:
             with pytest.raises(HTTPError) as error:
                 urlopen(base + path)
             assert error.value.code == 404

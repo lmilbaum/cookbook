@@ -12,6 +12,11 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .models import PostItem
+from .profile_timeline import ProfileTimeline
+
+
+class IncompleteProfileError(RuntimeError):
+    """The profile could not be scrolled to its end within the safety limit."""
 
 
 def _normalize_instagram_image_url(image_url: str) -> str:
@@ -262,11 +267,42 @@ def _select_unseen_media_paths(
     return [unseen_paths[position]] if position >= 0 else []
 
 
-def _scroll_profile_until_complete(page: Any, username: str) -> list[str]:
-    """Scroll the profile until no new media items are loaded."""
+def _scroll_profile_timeline(page: Any, timeline: ProfileTimeline) -> list[str]:
+    """Wait for profile pagination completion; unrelated feeds cannot advance it."""
+    idle = 0
+    for _ in range(4000):
+        if timeline.invalid:
+            raise IncompleteProfileError("Profile pagination data was incomplete; no post selected.")
+        if timeline.complete:
+            return timeline.paths()
+        previous_count = len(timeline.posts)
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(900)
+        if len(timeline.posts) > previous_count:
+            idle = 0
+        else:
+            idle += 1
+        if idle and idle % 10 == 0:
+            page.evaluate("window.scrollBy(0, -1200)")
+            page.wait_for_timeout(1000)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1500)
+            if len(timeline.posts) > previous_count:
+                idle = 0
+        if idle >= 30 and not timeline.complete:
+            raise IncompleteProfileError("Instagram did not confirm the profile pagination end; no post selected.")
+    raise IncompleteProfileError("Profile scrolling reached its safety limit; no post selected.")
+
+
+def _scroll_profile_until_complete(
+    page: Any, username: str, timeline: ProfileTimeline | None = None
+) -> list[str]:
+    """Scroll a confirmed timeline, or collect grid paths for legacy bulk imports."""
+
+    if timeline is not None:
+        return _scroll_profile_timeline(page, timeline)
 
     max_scrolls = 4000
-    target_media_items = 3000
     checkpoint_size = 3000
     idle_scroll_limit = 18
 
@@ -302,10 +338,6 @@ def _scroll_profile_until_complete(page: Any, username: str) -> list[str]:
             print(f"  Reached {next_checkpoint} media items")
             next_checkpoint += checkpoint_size
 
-        if len(all_media_paths) >= target_media_items:
-            print(f"  Reached target of {target_media_items} media items")
-            break
-
         if new_items == 0:
             idle_scrolls += 1
         else:
@@ -313,7 +345,7 @@ def _scroll_profile_until_complete(page: Any, username: str) -> list[str]:
 
         if idle_scrolls >= idle_scroll_limit:
             if slow_recheck_done:
-                break
+                return all_media_paths
 
             # One slow verification cycle avoids false "end reached" at high speed.
             slow_recheck_done = True
@@ -332,8 +364,9 @@ def _scroll_profile_until_complete(page: Any, username: str) -> list[str]:
             if recovered > 0:
                 print(f"  Slow recheck recovered {recovered} media items")
                 idle_scrolls = 0
+                slow_recheck_done = False
 
-    return all_media_paths
+    raise IncompleteProfileError("Profile scrolling reached its safety limit before finding the feed end; no post selected.")
 
 
 def _shortcode_from_media_path(media_path: str) -> str:
@@ -361,22 +394,30 @@ def _extract_caption(page: Any) -> str:
     return ""
 
 
-def _fetch_post_details(page: Any, media_path: str, timeout_seconds: int) -> PostItem:
+def _fetch_post_details(
+    page: Any, media_path: str, timeout_seconds: int, taken_at: int | None = None
+) -> PostItem:
     """Fetch details for a single post or reel by navigating to its page."""
 
     post_url = f"https://www.instagram.com{media_path}"
     page.goto(post_url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
     time.sleep(2)
 
-    timestamp_utc = datetime.now(UTC).isoformat()
-    time_locator = page.locator("time").first
-    if time_locator.count() > 0:
-        timestamp_raw = time_locator.get_attribute("datetime")
-        if timestamp_raw is not None:
-            try:
-                timestamp_utc = datetime.fromisoformat(timestamp_raw).astimezone(UTC).isoformat()
-            except ValueError:
-                pass
+    if taken_at is not None:
+        # The profile timeline already confirmed this publication time; the
+        # detail page's <time> element is unreliable for Reels and must not
+        # override it with a DOM-scrape fallback of "now".
+        timestamp_utc = datetime.fromtimestamp(taken_at, UTC).isoformat()
+    else:
+        timestamp_utc = datetime.now(UTC).isoformat()
+        time_locator = page.locator("time").first
+        if time_locator.count() > 0:
+            timestamp_raw = time_locator.get_attribute("datetime")
+            if timestamp_raw is not None:
+                try:
+                    timestamp_utc = datetime.fromisoformat(timestamp_raw).astimezone(UTC).isoformat()
+                except ValueError:
+                    pass
 
     page_text = page.locator("body").inner_text(timeout=5000)
     like_match = re.search(r"(\d+)\s+likes?", page_text, flags=re.IGNORECASE)
@@ -485,10 +526,13 @@ def fetch_posts_browser(
                 crawl_context.storage_state(path=str(browser_session))
                 print(f"Saved browser session to {browser_session}")
 
+            timeline = ProfileTimeline() if feed_position_from_end > 0 else None
+            if timeline is not None:
+                page.on("response", timeline.observe)
             _open_profile(page, username, timeout_seconds)
 
             print("Scrolling to load posts...")
-            media_paths = _scroll_profile_until_complete(page, username)
+            media_paths = _scroll_profile_until_complete(page, username, timeline)
             print(f"Collected {len(media_paths)} media items from the profile grid")
 
             if not media_paths:
@@ -512,6 +556,12 @@ def fetch_posts_browser(
                 print(f"No unseen posts found for profile {username}")
                 return []
 
+            known_timestamps = (
+                {path: taken_at for taken_at, path in timeline.posts.values()}
+                if timeline is not None
+                else {}
+            )
+
             print(f"Fetching details for {len(media_paths)} media items...")
             crawl_context.storage_state(path=str(browser_session))
             crawl_context.close()
@@ -521,7 +571,11 @@ def fetch_posts_browser(
 
             posts: list[PostItem] = []
             for index, media_path in enumerate(media_paths, start=1):
-                posts.append(_fetch_post_details(detail_page, media_path, timeout_seconds))
+                posts.append(
+                    _fetch_post_details(
+                        detail_page, media_path, timeout_seconds, known_timestamps.get(media_path)
+                    )
+                )
                 print(f"  [{index}] Fetched media {media_path}")
                 time.sleep(0.6)
 

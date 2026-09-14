@@ -31,6 +31,12 @@ files are retained. Refresh open browser tabs after an application upgrade.
 
 ## Fetch new posts
 
+In the hosted cookbook, click **ייבוא הפוסט הבא מהסוף** beside Add recipe to
+import one unseen post from the feed end. Wait for completion, then click
+**Refresh cookbook**. This uses the application's scraper directly, without AI.
+The commands below remain available for bulk or manual imports.
+
+
 Configure `cookbook.toml` and local Instagram credentials in `.env`.
 
 ```sh
