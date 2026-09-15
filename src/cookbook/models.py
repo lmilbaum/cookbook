@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -88,3 +88,22 @@ class ShoppingListState(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     revision: Mapped[int] = mapped_column(Integer)
+
+
+class RecipePage(Base):
+    """Full standalone recipe page, keyed by its URL slug."""
+
+    __tablename__ = "recipe_pages"
+
+    slug: Mapped[str] = mapped_column(Text, primary_key=True)
+    html: Mapped[str] = mapped_column(Text)
+
+
+class RecipeImage(Base):
+    """An image referenced by a recipe page, keyed by its filename."""
+
+    __tablename__ = "recipe_images"
+
+    filename: Mapped[str] = mapped_column(Text, primary_key=True)
+    content_type: Mapped[str] = mapped_column(Text)
+    data: Mapped[bytes] = mapped_column(LargeBinary)

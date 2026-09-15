@@ -275,6 +275,11 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
     from urllib.request import urlopen
     from urllib.error import HTTPError
     import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from cookbook.database import Base
 
     (tmp_path / 'lizapanelim_posts.html').write_text('Cookbook')
     (tmp_path / '.env').write_text('private fixture')
@@ -285,14 +290,10 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
     assets.mkdir()
     (assets / 'test.jpg').write_bytes(b'image fixture')
     (assets / 'secret.jpg').symlink_to(backups / 'backup.dump')
-    recipes = tmp_path / 'recipes'
-    recipes.mkdir()
-    (recipes / 'apple_cake.html').write_text('Apple cake story')
-    (recipes / 'notes.txt').write_text('not html')
-    nested = recipes / 'nested'
-    nested.mkdir()
-    (nested / 'apple_cake.html').write_text('nested story')
-    http = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(tmp_path, None))
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    http = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(tmp_path, factory))
     thread = threading.Thread(target=http.serve_forever, daemon=True)
     thread.start()
     base = f'http://127.0.0.1:{http.server_port}'
@@ -301,11 +302,10 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
             assert response.read() == b'Cookbook'
         with urlopen(base + '/lizapanelim_posts_assets/test.jpg') as response:
             assert response.read() == b'image fixture'
-        with urlopen(base + '/recipes/apple_cake.html') as response:
-            assert response.read() == b'Apple cake story'
         for path in ['/.env', '/.private-backups/backup.dump', '/lizapanelim_posts_assets/',
                      '/lizapanelim_posts_assets/secret.jpg', '/%2eenv',
-                     '/recipes/notes.txt', '/recipes/nested/apple_cake.html']:
+                     '/recipes/apple_cake.html', '/recipes/nested/apple_cake.html',
+                     '/recipes/assets/apple-cake.jpg']:
             with pytest.raises(HTTPError) as error:
                 urlopen(base + path)
             assert error.value.code == 404
@@ -313,3 +313,92 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
         http.shutdown()
         http.server_close()
         thread.join()
+        engine.dispose()
+
+
+def test_recipe_page_served_from_database(tmp_path, monkeypatch) -> None:
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from cookbook.database import Base
+    from cookbook.recipe_page_repository import insert_recipe_page
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    insert_recipe_page(factory, "apple_cake", "<html>Apple cake story</html>")
+    http = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(tmp_path, factory))
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{http.server_port}'
+    try:
+        with urlopen(base + '/recipes/apple_cake.html') as response:
+            assert response.read() == b"<html>Apple cake story</html>"
+            assert response.headers["Content-Type"] == "text/html; charset=utf-8"
+        with pytest.raises(HTTPError) as error:
+            urlopen(base + '/recipes/missing.html')
+        assert error.value.code == 404
+
+        def unavailable(*args):
+            raise SQLAlchemyError("private connection details")
+
+        monkeypatch.setattr(server, "load_recipe_page", unavailable)
+        with pytest.raises(HTTPError) as error:
+            urlopen(base + '/recipes/apple_cake.html')
+        assert error.value.code == 503
+    finally:
+        http.shutdown()
+        http.server_close()
+        thread.join()
+        engine.dispose()
+
+
+def test_recipe_image_served_from_database(tmp_path, monkeypatch) -> None:
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from cookbook.database import Base
+    from cookbook.recipe_image_repository import insert_recipe_image
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    insert_recipe_image(factory, "apple-cake.jpg", "image/jpeg", b"recipe image fixture")
+    http = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(tmp_path, factory))
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{http.server_port}'
+    try:
+        with urlopen(base + '/recipes/assets/apple-cake.jpg') as response:
+            assert response.read() == b"recipe image fixture"
+            assert response.headers["Content-Type"] == "image/jpeg"
+        with pytest.raises(HTTPError) as error:
+            urlopen(base + '/recipes/assets/missing.jpg')
+        assert error.value.code == 404
+
+        def unavailable(*args):
+            raise SQLAlchemyError("private connection details")
+
+        monkeypatch.setattr(server, "load_recipe_image", unavailable)
+        with pytest.raises(HTTPError) as error:
+            urlopen(base + '/recipes/assets/apple-cake.jpg')
+        assert error.value.code == 503
+    finally:
+        http.shutdown()
+        http.server_close()
+        thread.join()
+        engine.dispose()

@@ -6,6 +6,7 @@ import argparse
 import importlib
 import json
 import os
+import re
 import threading
 import time
 import webbrowser
@@ -24,6 +25,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import load_config
 from .database import create_session_factory
 from .import_service import ImportService
+from .recipe_image_repository import load_recipe_image
+from .recipe_page_repository import load_recipe_page
 from .recipe_state_repository import (
     RecipeStateConflict, load_recipe_state, save_recipe_state,
 )
@@ -237,6 +240,10 @@ def _create_trello_card(items: list[dict[str, Any]]) -> dict[str, str]:
     return {"id": card["id"], "url": card["url"], "action": action}
 
 
+_RECIPE_PAGE_PATH = re.compile(r"^/recipes/([^/]+)\.html$")
+_RECIPE_IMAGE_PATH = re.compile(r"^/recipes/assets/([^/]+)$")
+
+
 def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPRequestHandler]:
     """Create a request handler bound to the cookbook directory and database."""
 
@@ -267,11 +274,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     "lizapanelim_posts.html", "shopping_list.html", "notes.html", "favicon.svg",
                 } or (
                     candidate.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
-                    and (relative.parts[0].endswith("_posts_assets")
-                         or relative.parts[:2] == ("recipes", "assets"))
-                ) or (
-                    candidate.suffix.lower() == ".html" and len(relative.parts) == 2
-                    and relative.parts[0] == "recipes"
+                    and relative.parts[0].endswith("_posts_assets")
                 )
             if not allowed or not candidate.is_file():
                 self.send_error(404, "Not found")
@@ -288,6 +291,41 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self.wfile.write(body)
 
         def do_GET(self) -> None:
+            request_path = unquote(urlsplit(self.path).path)
+            recipe_image_match = _RECIPE_IMAGE_PATH.fullmatch(request_path)
+            if recipe_image_match:
+                try:
+                    image = load_recipe_image(factory, recipe_image_match.group(1))
+                except SQLAlchemyError:
+                    self.send_error(503, "Unable to read recipe image")
+                    return
+                if image is None:
+                    self.send_error(404, "Not found")
+                    return
+                data, content_type = image
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            recipe_page_match = _RECIPE_PAGE_PATH.fullmatch(request_path)
+            if recipe_page_match:
+                try:
+                    html = load_recipe_page(factory, recipe_page_match.group(1))
+                except SQLAlchemyError:
+                    self.send_error(503, "Unable to read recipe page")
+                    return
+                if html is None:
+                    self.send_error(404, "Not found")
+                    return
+                body = html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if urlsplit(self.path).path == "/api/import-post":
                 self._json_response(200, imports.status())
                 return
