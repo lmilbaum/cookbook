@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, MappedAsDataclass, mapped_column, relationship
 
 from .database import Base
 
@@ -31,44 +30,34 @@ class ShoppingListItem(Base):
     done: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-class Post(Base):
-    """Database-backed recipe post, identified by its Instagram shortcode."""
+class Recipe(MappedAsDataclass, Base, kw_only=True):
+    """A recipe, optionally sourced from an Instagram post."""
 
-    __tablename__ = "posts"
+    __tablename__ = "recipes"
 
-    shortcode: Mapped[str] = mapped_column(String(64), primary_key=True)
-    url: Mapped[str] = mapped_column(Text)
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
     image_url: Mapped[str] = mapped_column(Text)
     caption: Mapped[str] = mapped_column(Text)
     timestamp_utc: Mapped[str] = mapped_column(String(64), index=True)
-    likes: Mapped[int] = mapped_column(Integer)
-    comments: Mapped[int] = mapped_column(Integer)
-    typename: Mapped[str] = mapped_column(String(128))
-    is_video: Mapped[bool] = mapped_column(Boolean)
     title: Mapped[str] = mapped_column(Text, default="")
     recipe_url: Mapped[str] = mapped_column(Text, default="")
-    recipe_urls: Mapped[list[str]] = mapped_column(JSON, default=list)
-    recipe_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    recipe_name: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(32), default="lizapanelim")
+    # One-directional on purpose: a Post -> Recipe back-reference would make
+    # dataclasses.asdict()/equality recurse Recipe.post.recipe.post... forever.
+    post: Mapped[Post | None] = relationship(default=None)
+
+
+class Post(MappedAsDataclass, Base, kw_only=True):
+    """Instagram post metadata for a recipe, when it was scraped from Instagram."""
+
+    __tablename__ = "posts"
+
+    shortcode: Mapped[str] = mapped_column(ForeignKey("recipes.id"), primary_key=True)
+    url: Mapped[str] = mapped_column(Text)
+    typename: Mapped[str] = mapped_column(String(128))
+    is_video: Mapped[bool] = mapped_column(Boolean)
     is_recipe: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-@dataclass
-class PostItem:  # pylint: disable=too-many-instance-attributes
-    """Transfer representation shared by scrapers, imports, and report rendering."""
-
-    shortcode: str
-    url: str
-    image_url: str
-    caption: str
-    timestamp_utc: str
-    likes: int
-    comments: int
-    typename: str
-    is_video: bool
-    title: str = ""
-    recipe_url: str = ""
-    recipe_urls: list[str] = field(default_factory=list)
-    recipe_names: list[str] = field(default_factory=list)
 
 
 class RecipeState(Base):

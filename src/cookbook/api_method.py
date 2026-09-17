@@ -10,32 +10,34 @@ from typing import Any
 
 from .config import AppConfig
 from .dependencies import load_instaloader
-from .models import PostItem
+from .models import Post, Recipe
 
 
 class InstagramUnauthorizedError(RuntimeError):
     """Raised when Instagram API returns unauthorized (401)."""
 
 
-def _post_to_item(post: Any) -> PostItem:
-    """Convert an Instaloader post object to a serializable item."""
+def _post_to_recipe(post: Any) -> Recipe:
+    """Convert an Instaloader post object to a recipe with its attached post."""
 
     dt = post.date_utc
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     timestamp = dt.astimezone(UTC).isoformat()
 
-    return PostItem(
-        shortcode=post.shortcode,
-        url=f"https://www.instagram.com/p/{post.shortcode}/",
+    recipe = Recipe(
+        id=post.shortcode,
         image_url=str(getattr(post, "url", "") or ""),
         caption=(post.caption or "").strip(),
         timestamp_utc=timestamp,
-        likes=post.likes,
-        comments=post.comments,
+    )
+    recipe.post = Post(
+        shortcode=post.shortcode,
+        url=f"https://www.instagram.com/p/{post.shortcode}/",
         typename=post.typename,
         is_video=post.is_video,
     )
+    return recipe
 
 
 def _validate_fetch_settings(config: AppConfig) -> None:
@@ -97,7 +99,7 @@ def fetch_posts_api(
     config: AppConfig,
     login_user: str,
     seen_shortcodes: set[str] | None = None,
-) -> list[PostItem]:
+) -> list[Recipe]:
     """Fetch posts using Instaloader API with retry/backoff."""
 
     _validate_fetch_settings(config)
@@ -109,21 +111,21 @@ def fetch_posts_api(
 
         try:
             profile = instaloader.Profile.from_username(loader.context, config.username)
-            items: list[PostItem] = []
+            recipes: list[Recipe] = []
 
             # Instaloader yields posts from newest to oldest by default.
             for post in profile.get_posts():
                 if post.shortcode in seen_shortcodes:
                     continue
-                items.append(_post_to_item(post))
-                if 0 < config.limit <= len(items):
+                recipes.append(_post_to_recipe(post))
+                if 0 < config.limit <= len(recipes):
                     break
                 if config.request_delay_seconds > 0:
                     time.sleep(config.request_delay_seconds)
 
             if config.reverse:
-                items.reverse()
-            return items
+                recipes.reverse()
+            return recipes
         except instaloader.exceptions.ConnectionException as exc:
             message = str(exc)
             if _is_unauthorized_error(message):

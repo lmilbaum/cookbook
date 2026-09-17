@@ -3,40 +3,52 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
 from cookbook.config import AppConfig
 from cookbook.main import _fetch_posts_with_fallback
 
 from cookbook.post_store_import import load_post_store
-from cookbook.models import PostItem
+from cookbook.models import Post, Recipe
 
 
-def _post(shortcode: str, timestamp: str) -> PostItem:
-    return PostItem(
-        shortcode=shortcode,
-        url="https://example.com",
-        image_url="",
-        caption="",
-        timestamp_utc=timestamp,
-        likes=0,
-        comments=0,
-        typename="GraphImage",
-        is_video=False,
-    )
+def _flat_post_payload(shortcode: str, timestamp: str) -> dict[str, object]:
+    """Build a legacy flat per-post JSON payload, the on-disk store's format."""
+
+    return {
+        "shortcode": shortcode,
+        "url": "https://example.com",
+        "image_url": "",
+        "caption": "",
+        "timestamp_utc": timestamp,
+        "likes": 0,
+        "comments": 0,
+        "typename": "GraphImage",
+        "is_video": False,
+        "title": "",
+        "recipe_url": "",
+        "recipe_urls": [],
+        "recipe_names": [],
+    }
+
+
+def _recipe(shortcode: str, timestamp: str) -> Recipe:
+    recipe = Recipe(id=shortcode, image_url="", caption="", timestamp_utc=timestamp)
+    recipe.post = Post(shortcode=shortcode, url="https://example.com", typename="GraphImage", is_video=False)
+    return recipe
 
 
 def test_load_post_store_reads_complete_posts(tmp_path) -> None:
     store = tmp_path / "items"
     store.mkdir()
-    newest = _post("alphabetically-first", "2026-01-02T00:00:00+00:00")
-    oldest = _post("alphabetically-last", "2026-01-01T00:00:00+00:00")
-    for post in (newest, oldest):
-        (store / f"{post.shortcode}.json").write_text(
-            json.dumps(asdict(post)), encoding="utf-8"
-        )
+    newest = _flat_post_payload("alphabetically-first", "2026-01-02T00:00:00+00:00")
+    oldest = _flat_post_payload("alphabetically-last", "2026-01-01T00:00:00+00:00")
+    for payload in (newest, oldest):
+        (store / f"{payload['shortcode']}.json").write_text(json.dumps(payload), encoding="utf-8")
 
-    assert load_post_store(store) == [newest, oldest]
+    assert load_post_store(store) == [
+        _recipe("alphabetically-first", "2026-01-02T00:00:00+00:00"),
+        _recipe("alphabetically-last", "2026-01-01T00:00:00+00:00"),
+    ]
 
 
 def test_configured_browser_scraper_is_used_without_calling_the_api(monkeypatch) -> None:
@@ -56,7 +68,7 @@ def test_configured_browser_scraper_is_used_without_calling_the_api(monkeypatch)
         ignore_cached_posts=False,
         feed_position_from_end=1,
     )
-    expected = [_post("browser-post", "2026-01-01T00:00:00+00:00")]
+    expected = [_recipe("browser-post", "2026-01-01T00:00:00+00:00")]
     monkeypatch.setattr("cookbook.main._fetch_posts_browser_only", lambda *_: expected)
     monkeypatch.setattr(
         "cookbook.main.fetch_posts_api",

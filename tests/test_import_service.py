@@ -11,8 +11,8 @@ from sqlalchemy.orm import sessionmaker
 
 from cookbook import import_service, post_import_job, server
 from cookbook.database import Base
-from cookbook.models import PostItem
-from cookbook.post_repository import insert_missing_posts, load_posts, mark_not_recipe
+from cookbook.models import Post, Recipe
+from cookbook.post_repository import insert_missing_recipes, load_recipes, mark_not_recipe
 
 
 def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, monkeypatch):
@@ -20,23 +20,25 @@ def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, mo
     engine = create_engine('sqlite://')
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
-    def post(code):
-        return PostItem(code, '', '', '', '2026-01-01', 0, 0, 'GraphImage', False)
-    insert_missing_posts(factory, [post('hidden'), post('known')])
+    def recipe(code):
+        item = Recipe(id=code, image_url='', caption='', timestamp_utc='2026-01-01')
+        item.post = Post(shortcode=code, url='https://example.com', typename='GraphImage', is_video=False)
+        return item
+    insert_missing_recipes(factory, [recipe('hidden'), recipe('known')])
     mark_not_recipe(factory, 'hidden')
     calls = []
     cached = []
     def fetch(username, **kwargs):
         calls.append(kwargs)
-        return [post('next')]
+        return [recipe('next')]
     monkeypatch.setattr(post_import_job, 'fetch_posts_browser', fetch)
-    monkeypatch.setattr(post_import_job, '_cache_images_for_report', lambda posts, path: cached.append(posts))
+    monkeypatch.setattr(post_import_job, '_cache_images_for_report', lambda recipes, path: cached.append(recipes))
     monkeypatch.setattr(post_import_job, 'load_dotenv', lambda *args: None)
     assert post_import_job.import_next_post(tmp_path, factory) == 1
     assert calls[0]['seen_shortcodes'] == {'hidden', 'known'}
     assert calls[0]['feed_position_from_end'] == 1
     assert calls[0]['limit'] == 1 and calls[0]['headless'] is True
-    assert {post.shortcode for post in load_posts(factory, False)} == {'known', 'next'}
+    assert {item.id for item in load_recipes(factory, False)} == {'known', 'next'}
     assert len(cached) == 1
     assert post_import_job.import_next_post(tmp_path, factory) == 0
     assert len(cached) == 1

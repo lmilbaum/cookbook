@@ -15,9 +15,9 @@ from .api_method import InstagramUnauthorizedError, fetch_posts_api
 from .browser_scraper import fetch_posts_browser
 from .config import AppConfig, load_config, parse_args, resolve_from
 from .dependencies import load_dotenv_loader
-from .models import PostItem
+from .models import Recipe
 from .database import create_session_factory
-from .post_repository import insert_missing_posts, load_posts
+from .post_repository import insert_missing_recipes, load_recipes
 from .report_html import (
     render_html,
     render_notes_html,
@@ -38,26 +38,26 @@ def _find_cached_asset(assets_dir: Path, shortcode: str) -> Path | None:
 
 # pylint: disable=too-many-locals
 def _cache_images_for_report(
-    posts: list[PostItem],
+    recipes: list[Recipe],
     output_path: Path,
     reuse_cached_assets: bool = True,
-) -> list[PostItem]:
+) -> list[Recipe]:
     """Download image URLs to local files for robust HTML rendering."""
 
     assets_dir = output_path.with_name(f"{output_path.stem}_assets")
     assets_dir.mkdir(parents=True, exist_ok=True)
 
-    cached_posts: list[PostItem] = []
-    for post in posts:
-        image_url = post.image_url.strip()
+    cached_recipes: list[Recipe] = []
+    for recipe in recipes:
+        image_url = recipe.image_url.strip()
         if not image_url.startswith("http"):
-            cached_posts.append(post)
+            cached_recipes.append(recipe)
             continue
 
-        existing_cached_asset = _find_cached_asset(assets_dir, post.shortcode)
+        existing_cached_asset = _find_cached_asset(assets_dir, recipe.id)
         if reuse_cached_assets and existing_cached_asset is not None:
             local_ref = existing_cached_asset.relative_to(output_path.parent).as_posix()
-            cached_posts.append(replace(post, image_url=local_ref))
+            cached_recipes.append(replace(recipe, image_url=local_ref))
             continue
 
         split = urlsplit(image_url)
@@ -65,12 +65,13 @@ def _cache_images_for_report(
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
             suffix = ".jpg"
 
-        target_path = assets_dir / f"{post.shortcode}{suffix}"
-        candidate_urls = [
-            image_url,
-            f"https://www.instagram.com/p/{post.shortcode}/media/?size=l",
-            f"https://www.instagram.com/p/{post.shortcode}/media/?size=m",
-        ]
+        target_path = assets_dir / f"{recipe.id}{suffix}"
+        candidate_urls = [image_url]
+        if recipe.post is not None:
+            candidate_urls += [
+                f"https://www.instagram.com/p/{recipe.post.shortcode}/media/?size=l",
+                f"https://www.instagram.com/p/{recipe.post.shortcode}/media/?size=m",
+            ]
 
         content: bytes | None = None
         for candidate_url in candidate_urls:
@@ -94,19 +95,19 @@ def _cache_images_for_report(
                 continue
 
         if content is None:
-            fallback_asset = _find_cached_asset(assets_dir, post.shortcode)
+            fallback_asset = _find_cached_asset(assets_dir, recipe.id)
             if fallback_asset is not None:
                 local_ref = fallback_asset.relative_to(output_path.parent).as_posix()
-                cached_posts.append(replace(post, image_url=local_ref))
+                cached_recipes.append(replace(recipe, image_url=local_ref))
             else:
-                cached_posts.append(replace(post, image_url=""))
+                cached_recipes.append(replace(recipe, image_url=""))
             continue
 
         target_path.write_bytes(content)
         local_ref = target_path.relative_to(output_path.parent).as_posix()
-        cached_posts.append(replace(post, image_url=local_ref))
+        cached_recipes.append(replace(recipe, image_url=local_ref))
 
-    return cached_posts
+    return cached_recipes
 
 
 def _cooldown_marker_path(session_file: str) -> Path:
@@ -159,7 +160,7 @@ def _fetch_posts_browser_only(
     login_user: str,
     password: str,
     seen_shortcodes: set[str],
-) -> list[PostItem]:
+) -> list[Recipe]:
     """Fetch via browser scraper, validating required credentials."""
 
     if not login_user:
@@ -184,7 +185,7 @@ def _fetch_posts_with_fallback(
     login_user: str,
     password: str,
     seen_shortcodes: set[str],
-) -> list[PostItem]:
+) -> list[Recipe]:
     """Try API first, then fall back to browser scraping on unauthorized response."""
 
     if config.use_browser:
@@ -243,12 +244,16 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
 
     session_factory = create_session_factory()
     fetch_seen_shortcodes: set[str] = set()
-    existing_posts: list[PostItem] = []
+    existing_recipes: list[Recipe] = []
     if not config.ignore_cached_posts:
-        existing_posts = load_posts(session_factory, reverse=config.reverse)
-        fetch_seen_shortcodes = {post.shortcode for post in existing_posts}
+        existing_recipes = load_recipes(session_factory, reverse=config.reverse)
+        fetch_seen_shortcodes = {
+            recipe.post.shortcode for recipe in existing_recipes if recipe.post is not None
+        }
         if config.feed_position_from_end > 0:
-            fetch_seen_shortcodes = {post.shortcode for post in existing_posts}
+            fetch_seen_shortcodes = {
+                recipe.post.shortcode for recipe in existing_recipes if recipe.post is not None
+            }
 
     fetch_config = config
     should_fetch = True
@@ -258,28 +263,28 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
             # of how many posts have already been imported.
             fetch_config = replace(config, limit=1)
         else:
-            remaining_slots = max(config.limit - len(existing_posts), 0)
+            remaining_slots = max(config.limit - len(existing_recipes), 0)
             should_fetch = remaining_slots > 0
             if should_fetch:
                 fetch_config = replace(config, limit=remaining_slots)
 
-    new_posts = (
+    new_recipes = (
         _fetch_posts_with_fallback(fetch_config, login_user, password, fetch_seen_shortcodes)
         if should_fetch
         else []
     )
     if not config.ignore_cached_posts:
-        insert_missing_posts(session_factory, new_posts)
-        merged_posts = load_posts(session_factory, reverse=config.reverse)
+        insert_missing_recipes(session_factory, new_recipes)
+        merged_recipes = load_recipes(session_factory, reverse=config.reverse)
     else:
-        merged_posts = new_posts
-    report_posts = _cache_images_for_report(
-        merged_posts,
+        merged_recipes = new_recipes
+    report_recipes = _cache_images_for_report(
+        merged_recipes,
         output_path,
         reuse_cached_assets=not config.ignore_cached_posts,
     )
 
-    payload = [asdict(post) for post in report_posts]
+    payload = [asdict(recipe) for recipe in report_recipes]
     with open(output_path, "w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, indent=2)
 
@@ -287,7 +292,7 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     html_path = output_path.with_suffix(".html")
     html_path.write_text(
         render_html(
-            report_posts,
+            report_recipes,
             config.username,
             favicon_href=favicon_path.name,
         ),
@@ -300,7 +305,7 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     )
     notes_path = html_path.with_name("notes.html")
     notes_path.write_text(
-        render_notes_html(report_posts, favicon_href=favicon_path.name),
+        render_notes_html(report_recipes, favicon_href=favicon_path.name),
         encoding="utf-8",
     )
     if not args.no_open:
@@ -308,8 +313,8 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
         if not was_opened:
             raise RuntimeError(f"Failed to open HTML report: {html_path}")
 
-    print(f"Fetched {len(new_posts)} new posts for @{config.username} -> {output_path}")
-    print(f"Total posts in output: {len(merged_posts)}")
+    print(f"Fetched {len(new_recipes)} new posts for @{config.username} -> {output_path}")
+    print(f"Total posts in output: {len(merged_recipes)}")
     action = "Updated HTML report" if args.no_open else "Updated and opened HTML report"
     print(f"{action} -> {html_path}")
     if config.ignore_cached_posts:

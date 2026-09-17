@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .models import PostItem
+from .models import Post, Recipe
 from .profile_timeline import ProfileTimeline
 
 
@@ -396,7 +396,7 @@ def _extract_caption(page: Any) -> str:
 
 def _fetch_post_details(
     page: Any, media_path: str, timeout_seconds: int, taken_at: int | None = None
-) -> PostItem:
+) -> Recipe:
     """Fetch details for a single post or reel by navigating to its page."""
 
     post_url = f"https://www.instagram.com{media_path}"
@@ -419,10 +419,6 @@ def _fetch_post_details(
                 except ValueError:
                     pass
 
-    page_text = page.locator("body").inner_text(timeout=5000)
-    like_match = re.search(r"(\d+)\s+likes?", page_text, flags=re.IGNORECASE)
-    comment_match = re.search(r"(\d+)\s+comments?", page_text, flags=re.IGNORECASE)
-
     caption = _extract_caption(page)
 
     image_url = _extract_highest_resolution_image(page)
@@ -435,17 +431,19 @@ def _fetch_post_details(
     shortcode = _shortcode_from_media_path(media_path)
     is_video = media_path.startswith("/reel/")
 
-    return PostItem(
-        shortcode=shortcode,
-        url=post_url,
+    recipe = Recipe(
+        id=shortcode,
         image_url=image_url,
         caption=caption,
         timestamp_utc=timestamp_utc,
-        likes=int(like_match.group(1)) if like_match else 0,
-        comments=int(comment_match.group(1)) if comment_match else 0,
+    )
+    recipe.post = Post(
+        shortcode=shortcode,
+        url=post_url,
         typename="GraphVideo" if is_video else "GraphImage",
         is_video=is_video,
     )
+    return recipe
 
 
 def _new_context(browser: Any, session_state: Path | None, block_media: bool = False) -> Any:
@@ -485,7 +483,7 @@ def fetch_posts_browser(
     session_file: str = ".instagram.session",
     seen_shortcodes: set[str] | None = None,
     feed_position_from_end: int = 0,
-) -> list[PostItem]:
+) -> list[Recipe]:
     """Fetch Instagram posts using a headless browser with required authentication."""
 
     if not login_user:
@@ -569,9 +567,9 @@ def fetch_posts_browser(
             detail_context = _new_context(browser, browser_session, block_media=False)
             detail_page = detail_context.new_page()
 
-            posts: list[PostItem] = []
+            recipes: list[Recipe] = []
             for index, media_path in enumerate(media_paths, start=1):
-                posts.append(
+                recipes.append(
                     _fetch_post_details(
                         detail_page, media_path, timeout_seconds, known_timestamps.get(media_path)
                     )
@@ -579,11 +577,11 @@ def fetch_posts_browser(
                 print(f"  [{index}] Fetched media {media_path}")
                 time.sleep(0.6)
 
-            if not posts:
+            if not recipes:
                 raise RuntimeError(f"Failed to extract post details from profile {username}.")
 
-            print(f"Successfully extracted {len(posts)} posts")
-            return posts
+            print(f"Successfully extracted {len(recipes)} posts")
+            return recipes
         finally:
             if detail_context is not None:
                 detail_context.close()

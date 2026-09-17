@@ -7,14 +7,7 @@ import json
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from .models import PostItem
-
-
-def _recipe_urls_for_post(post: PostItem) -> list[str]:
-    """Return unique recipe URLs, supporting both old and new item formats."""
-
-    urls = ([post.recipe_url] if post.recipe_url.strip() else []) + post.recipe_urls
-    return list(dict.fromkeys(url.strip() for url in urls if url.strip()))
+from .models import Recipe
 
 
 def _recipe_name_from_url(recipe_url: str) -> str:
@@ -27,17 +20,17 @@ def _recipe_name_from_url(recipe_url: str) -> str:
     return " ".join(name.split()) or "Recipe"
 
 
-def _title_for_post(post: PostItem, titles: dict[str, str]) -> str:
+def _title_for_recipe(recipe: Recipe, titles: dict[str, str]) -> str:
     """Prefer a user-provided title, then use the first caption line."""
 
-    if post.title.strip():
-        return post.title.strip()
+    if recipe.title.strip():
+        return recipe.title.strip()
 
-    sidecar_title = titles.get(post.shortcode, "").strip()
+    sidecar_title = titles.get(recipe.id, "").strip()
     if sidecar_title:
         return sidecar_title
 
-    caption_lines = [line.strip() for line in post.caption.splitlines() if line.strip()]
+    caption_lines = [line.strip() for line in recipe.caption.splitlines() if line.strip()]
     return caption_lines[0] if caption_lines else ""
 
 
@@ -175,34 +168,31 @@ _IMPORT_POST_SCRIPT = r"""
 
 
 def render_html(
-    posts: list[PostItem],
+    recipes: list[Recipe],
     username: str,
     favicon_href: str,
     titles: dict[str, str] | None = None,
 ) -> str:
-    """Render fetched posts into a standalone HTML document."""
+    """Render fetched recipes into a standalone HTML document."""
 
     titles = titles or {}
     base_recipes: list[dict[str, object]] = []
-    for post in posts:
-        title = _title_for_post(post, titles)
-        recipe_urls = _recipe_urls_for_post(post)
-        recipe_names = [
-            post.recipe_names[index].strip()
-            if index < len(post.recipe_names) and post.recipe_names[index].strip()
-            else _recipe_name_from_url(recipe_url)
-            for index, recipe_url in enumerate(recipe_urls)
-        ]
+    for recipe in recipes:
+        title = _title_for_recipe(recipe, titles)
+        recipe_url = recipe.recipe_url.strip()
+        recipe_urls = [recipe_url] if recipe_url else []
+        recipe_name = recipe.recipe_name.strip() or (_recipe_name_from_url(recipe_url) if recipe_url else "")
         base_recipes.append(
             {
-                "id": post.shortcode,
+                "id": recipe.id,
                 "title": title,
-                "sourceUrl": post.url,
-                "recipeUrl": recipe_urls[0] if recipe_urls else "",
-                "recipeName": recipe_names[0] if recipe_names else "",
+                "sourceUrl": recipe.post.url if recipe.post else "",
+                "source": recipe.source,
+                "recipeUrl": recipe_url,
+                "recipeName": recipe_name,
                 "recipeUrls": recipe_urls,
-                "recipeNames": recipe_names,
-                "imageUrl": post.image_url,
+                "recipeNames": [recipe_name] if recipe_name else [],
+                "imageUrl": recipe.image_url,
                 "ingredients": [],
                 "instructions": "",
                 "prerequisiteId": "",
@@ -244,6 +234,11 @@ def render_html(
       .page-header h1 {{ margin: 0; text-align: right; direction: rtl; }}
       .back-to-cookbook {{ display: none; margin-bottom: 14px; text-align: right; direction: rtl; }}
       .recipe-view .back-to-cookbook {{ display: block; }}
+      .source-filter {{ display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 0 0 16px; padding: 10px 12px; border: 1px solid #303644; border-radius: 9px; background: #12151b; direction: rtl; }}
+      .source-filter span.meta-label {{ margin: 0; }}
+      .source-filter label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; }}
+      .recipe-view .source-filter {{ display: none; }}
+      .no-filter-results {{ color: #929baa; }}
       .link-row {{
         margin: 0 0 10px;
       }}
@@ -383,7 +378,13 @@ def render_html(
         <a id="import-refresh" href="lizapanelim_posts.html" hidden>Refresh cookbook</a>
       </div>
       <a class="back-to-cookbook" href="lizapanelim_posts.html">חזרה לכל המתכונים</a>
+      <div class="source-filter" id="source-filter" role="group" aria-label="סינון לפי מקור">
+        <span class="meta-label">מקור</span>
+        <label><input type="checkbox" id="filter-lizapanelim" checked /> ליזה פאנלים</label>
+        <label><input type="checkbox" id="filter-other" checked /> אחר</label>
+      </div>
       <section class=\"grid\" id=\"recipe-grid\"></section>
+      <p class="no-filter-results" id="no-filter-results" hidden>אין מתכונים התואמים לסינון.</p>
     </main>
     <dialog id="recipe-dialog">
       <form class="recipe-form" id="recipe-form">
@@ -587,9 +588,27 @@ def render_html(
           formTitle.textContent = recipe.id ? "עריכת המתכון" : "הוספת מתכון"; deleteButton.hidden = !isCustom; saveStatus.textContent = "";
           if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
+        const sourceFilter = document.getElementById("source-filter");
+        const filterLizapanelim = document.getElementById("filter-lizapanelim");
+        const filterOther = document.getElementById("filter-other");
+        const noFilterResults = document.getElementById("no-filter-results");
+        const applySourceFilter = () => {{
+          if (selectedRecipeId) return;
+          const showLiza = filterLizapanelim.checked;
+          const showOther = filterOther.checked;
+          let anyVisible = false;
+          grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{
+            const visible = recipeFromCard(card).source === "lizapanelim" ? showLiza : showOther;
+            card.hidden = !visible;
+            if (visible) anyVisible = true;
+          }});
+          noFilterResults.hidden = anyVisible || !grid.children.length;
+        }};
+        sourceFilter.addEventListener("change", applySourceFilter);
         const recipesById = new Map(allRecipes().map((recipe) => [recipe.id, recipe]));
         state.order.forEach((id) => grid.append(createCard(recipesById.get(id))));
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
+        applySourceFilter();
         if (selectedRecipeId) {{
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{ card.hidden = card.dataset.recipeId !== selectedRecipeId; }});
           document.getElementById("add-recipe").hidden = true;
@@ -607,7 +626,7 @@ def render_html(
           requestAnimationFrame(restoreScroll);
           window.addEventListener("load", restoreScroll, {{ once: true }});
         }}
-        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", prerequisiteId: "", notes: "" }}, true));
+        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", prerequisiteId: "", notes: "", source: "other" }}, true));
         document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
         document.getElementById("cancel-recipe").addEventListener("click", () => dialog.close());
         grid.addEventListener("input", (event) => {{
@@ -660,6 +679,7 @@ def render_html(
             instructions: instructionsInput.value.trim(),
             prerequisiteId: previous.prerequisiteId || "",
             notes: previous.notes || "",
+            source: previous.source || "other",
           }};
           if (!recipe.title) return;
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
@@ -667,6 +687,7 @@ def render_html(
           if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
           const saved = save(saveStatus); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.append(createCard(recipe));
           grid.querySelectorAll("[data-recipe-id]").forEach((recipeCard) => updateCard(recipeCard, recipeFromCard(recipeCard)));
+          applySourceFilter();
           if (!await saved) return;
           if (!selectedRecipeId) setTimeout(() => dialog.close(), 350);
         }});
@@ -674,6 +695,7 @@ def render_html(
           const id = idInput.value; if (!id || baseIds.has(id)) return;
           state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); if (!await save(saveStatus)) return; grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
+          applySourceFilter();
           if (selectedRecipeId) window.location.href = "lizapanelim_posts.html";
           else dialog.close();
         }});
@@ -685,19 +707,19 @@ def render_html(
 """
 
 
-def render_notes_html(posts: list[PostItem], favicon_href: str) -> str:
+def render_notes_html(recipes: list[Recipe], favicon_href: str) -> str:
     """Render recipe notes on their own page, sharing cookbook database state."""
 
     base_recipes = [
         {
-            "id": post.shortcode,
-            "title": _title_for_post(post, {}),
-            "sourceUrl": post.url,
-            "recipeUrl": (_recipe_urls_for_post(post) or [""])[0],
-            "imageUrl": post.image_url,
+            "id": recipe.id,
+            "title": _title_for_recipe(recipe, {}),
+            "sourceUrl": recipe.post.url if recipe.post else "",
+            "recipeUrl": recipe.recipe_url,
+            "imageUrl": recipe.image_url,
             "notes": "",
         }
-        for post in posts
+        for recipe in recipes
     ]
     recipes_json = json.dumps(base_recipes, ensure_ascii=False).replace("</", "<\\/")
     safe_favicon_href = html.escape(favicon_href, quote=True)

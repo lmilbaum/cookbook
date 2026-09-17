@@ -1,82 +1,75 @@
-"""Database persistence for recipe posts."""
+"""Database persistence for recipes and their optional Instagram posts."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, contains_eager, sessionmaker
 
 from .database import session_scope
-from .models import Post, PostItem
+from .models import Post, Recipe
+
+LIZAPANELIM_HOST = "lizapanelim.com"
 
 
-def item_from_post(post: Post) -> PostItem:
-    """Convert an ORM post to the report and scraper representation."""
+def _is_lizapanelim_url(url: str) -> bool:
+    """A recipe link counts as hers if it has no host (a local page) or is on her domain."""
 
-    return PostItem(
-        shortcode=post.shortcode,
-        url=post.url,
-        image_url=post.image_url,
-        caption=post.caption,
-        timestamp_utc=post.timestamp_utc,
-        likes=post.likes,
-        comments=post.comments,
-        typename=post.typename,
-        is_video=post.is_video,
-        title=post.title,
-        recipe_url=post.recipe_url,
-        recipe_urls=list(post.recipe_urls),
-        recipe_names=list(post.recipe_names),
-    )
+    netloc = urlsplit(url).netloc.lower()
+    return not netloc or netloc.removeprefix("www.") == LIZAPANELIM_HOST
 
 
-def post_from_item(item: PostItem) -> Post:
-    """Convert a scraper result to an ORM post."""
+def classify_source(recipe: Recipe) -> str:
+    """A recipe is hers if she posted it on Instagram, regardless of an external recipe link.
 
-    return Post(
-        shortcode=item.shortcode,
-        url=item.url,
-        image_url=item.image_url,
-        caption=item.caption,
-        timestamp_utc=item.timestamp_utc,
-        likes=item.likes,
-        comments=item.comments,
-        typename=item.typename,
-        is_video=item.is_video,
-        title=item.title,
-        recipe_url=item.recipe_url,
-        recipe_urls=item.recipe_urls,
-        recipe_names=item.recipe_names,
-    )
+    Only a recipe with no Instagram post at all falls back to the recipe
+    link's own domain (e.g. a hand-curated recipe from another site).
+    """
+
+    if recipe.post is not None:
+        return "lizapanelim"
+    url = recipe.recipe_url.strip()
+    if not url or _is_lizapanelim_url(url):
+        return "lizapanelim"
+    return "other"
 
 
-def load_posts(factory: sessionmaker[Session], reverse: bool) -> list[PostItem]:
-    """Return all database posts in the configured report ordering."""
+def load_recipes(factory: sessionmaker[Session], reverse: bool) -> list[Recipe]:
+    """Return all visible recipes in the configured report ordering."""
 
-    ordering = Post.timestamp_utc.asc() if reverse else Post.timestamp_utc.desc()
+    ordering = Recipe.timestamp_utc.asc() if reverse else Recipe.timestamp_utc.desc()
     with factory() as session:
-        posts = session.scalars(
-            select(Post).where(Post.is_recipe.is_(True)).order_by(ordering)
-        ).all()
-        return [item_from_post(post) for post in posts]
+        return (
+            session.scalars(
+                select(Recipe)
+                .outerjoin(Recipe.post)
+                .options(contains_eager(Recipe.post))
+                .where(or_(Recipe.post == None, Post.is_recipe.is_(True)))
+                .order_by(ordering)
+            )
+            .unique()
+            .all()
+        )
 
 
-def insert_missing_posts(
-    factory: sessionmaker[Session], items: Iterable[PostItem], titles: dict[str, str] | None = None
+def insert_missing_recipes(
+    factory: sessionmaker[Session], recipes: Iterable[Recipe], titles: dict[str, str] | None = None
 ) -> int:
-    """Insert new scraper results without replacing existing database rows."""
+    """Insert new recipes, with any attached post, without replacing existing rows."""
 
     inserted = 0
     with session_scope(factory) as session:
-        for shortcode, title in (titles or {}).items():
-            post = session.get(Post, shortcode)
-            if post is not None and not post.title.strip() and title.strip():
-                post.title = title.strip()
-        for item in items:
-            if session.get(Post, item.shortcode) is not None:
+        for recipe_id, title in (titles or {}).items():
+            recipe = session.get(Recipe, recipe_id)
+            if recipe is not None and not recipe.title.strip() and title.strip():
+                recipe.title = title.strip()
+        for recipe in recipes:
+            if session.get(Recipe, recipe.id) is not None:
                 continue
-            session.add(post_from_item(item))
+            recipe.source = classify_source(recipe)
+            session.add(recipe)
             inserted += 1
     return inserted
 

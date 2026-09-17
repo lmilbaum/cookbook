@@ -14,7 +14,7 @@ from .config import load_config, resolve_from
 from .database import create_session_factory
 from .main import _cache_images_for_report
 from .models import Post
-from .post_repository import insert_missing_posts
+from .post_repository import insert_missing_recipes
 
 
 def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
@@ -23,18 +23,20 @@ def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
     load_dotenv(resolve_from(root, config.env_file))
     with factory() as session:
         seen = set(session.scalars(select(Post.shortcode)))
-    posts = fetch_posts_browser(
+    recipes = fetch_posts_browser(
         config.username, limit=1, headless=True,
         login_user=config.login_user or os.getenv("INSTAGRAM_USERNAME", "").strip(),
         login_pass=os.getenv("INSTAGRAM_PASSWORD", "").strip(),
         session_file=str(resolve_from(root, config.session_file)),
         seen_shortcodes=seen, feed_position_from_end=1,
     )
-    posts = [post for post in posts if post.shortcode not in seen][:1]
-    if not posts:
+    recipes = [
+        recipe for recipe in recipes if recipe.post is not None and recipe.post.shortcode not in seen
+    ][:1]
+    if not recipes:
         return 0
-    _cache_images_for_report(posts, root / "lizapanelim_posts.json")
-    return insert_missing_posts(factory, posts)
+    _cache_images_for_report(recipes, root / "lizapanelim_posts.json")
+    return insert_missing_recipes(factory, recipes)
 
 
 def main() -> None:

@@ -176,37 +176,37 @@ def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
     from sqlalchemy.orm import sessionmaker
 
     from cookbook.database import Base
-    from cookbook.models import PostItem
-    from cookbook.post_repository import insert_missing_posts, load_posts, mark_not_recipe
+    from cookbook.models import Post, Recipe
+    from cookbook.post_repository import insert_missing_recipes, load_recipes, mark_not_recipe
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
     legacy = tmp_path / "lizapanelim_posts.json"
     legacy.write_text("invalid legacy JSON must not be read")
     report = legacy.with_suffix(".html")
-    item = PostItem(
-        shortcode="database-recipe", url="https://example.com/recipe", image_url="",
+    item = Recipe(
+        id="database-recipe", image_url="",
         caption="Database recipe caption", timestamp_utc="2026-01-01T00:00:00+00:00",
-        likes=0, comments=0, typename="GraphImage", is_video=False,
         title="Database recipe title",
     )
+    item.post = Post(shortcode="database-recipe", url="https://example.com/recipe", typename="GraphImage", is_video=False)
     item.image_url = "https://expired.example/recipe.jpg"
     assets = tmp_path / "lizapanelim_posts_assets"
     assets.mkdir()
-    cached_image = assets / f"{item.shortcode}.jpg"
+    cached_image = assets / f"{item.id}.jpg"
     cached_image.write_bytes(b"cached image")
-    insert_missing_posts(factory, [item])
-    server._render_reports(report, load_posts(factory, reverse=False))
+    insert_missing_recipes(factory, [item])
+    server._render_reports(report, load_recipes(factory, reverse=False))
     assert "Database recipe title" in report.read_text()
     assert "lizapanelim_posts_assets/database-recipe.jpg" in report.read_text()
     assert "expired.example" not in report.read_text()
-    assert load_posts(factory, reverse=False)[0].image_url == item.image_url
+    assert load_recipes(factory, reverse=False)[0].image_url == item.image_url
     assert cached_image.read_bytes() == b"cached image"
     assert (tmp_path / "notes.html").exists()
     assert (tmp_path / "shopping_list.html").exists()
-    mark_not_recipe(factory, item.shortcode)
-    server._render_reports(report, load_posts(factory, reverse=False))
+    mark_not_recipe(factory, item.post.shortcode)
+    server._render_reports(report, load_recipes(factory, reverse=False))
     assert "Database recipe title" not in report.read_text()
     assert legacy.read_text() == "invalid legacy JSON must not be read"
     engine.dispose()
@@ -232,7 +232,7 @@ def test_reload_retries_database_failure_and_only_renders_changes(tmp_path, monk
         if polls == 4:
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(server, "load_posts", load)
+    monkeypatch.setattr(server, "load_recipes", load)
     monkeypatch.setattr(server, "_render_reports", lambda path, posts: rendered.append(posts))
     monkeypatch.setattr(server.time, "sleep", sleep)
     with pytest.raises(KeyboardInterrupt):
@@ -245,20 +245,19 @@ def test_report_order_honors_config_and_reload_changes(tmp_path):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from cookbook.database import Base
-    from cookbook.models import PostItem
-    from cookbook.post_repository import insert_missing_posts
+    from cookbook.models import Recipe
+    from cookbook.post_repository import insert_missing_recipes
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
-    posts = [PostItem(
-        shortcode=name, url="", image_url="", caption="",
-        timestamp_utc=date, likes=0, comments=0, typename="GraphImage", is_video=False,
+    recipes = [Recipe(
+        id=name, image_url="", caption="", timestamp_utc=date,
     ) for name, date in [("newest", "2026-02-01"), ("oldest", "2026-01-01")]]
-    insert_missing_posts(factory, posts)
+    insert_missing_recipes(factory, recipes)
 
     def order():
-        return [post.shortcode for post in server._load_report_posts(tmp_path, factory)]
+        return [recipe.id for recipe in server._load_report_recipes(tmp_path, factory)]
 
     assert order() == ["newest", "oldest"]
     config = tmp_path / "cookbook.toml"

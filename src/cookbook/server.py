@@ -32,11 +32,11 @@ from .recipe_state_repository import (
 )
 from .shopping_list_repository import load_shopping_state, save_shopping_list, valid_items, ShoppingListConflict
 
-from .models import PostItem
-from .post_repository import load_posts
+from .models import Recipe
+from .post_repository import load_recipes
 
 
-def _render_reports(report_path: Path, posts: list[PostItem]) -> None:
+def _render_reports(report_path: Path, recipes: list[Recipe]) -> None:
     """Rebuild static pages from a database snapshot, leaving JSON exports alone."""
 
     from . import report_html  # Imported here so development reloads can refresh it.
@@ -48,15 +48,15 @@ def _render_reports(report_path: Path, posts: list[PostItem]) -> None:
         for asset in sorted(assets_dir.glob("*"), reverse=True)
         if asset.is_file() and asset.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
     }
-    posts = [
-        replace(post, image_url=cached_assets[post.shortcode].relative_to(report_path.parent).as_posix())
-        if post.shortcode in cached_assets else post
-        for post in posts
+    recipes = [
+        replace(recipe, image_url=cached_assets[recipe.id].relative_to(report_path.parent).as_posix())
+        if recipe.id in cached_assets else recipe
+        for recipe in recipes
     ]
     favicon_path = report_html.write_favicon(report_path)
     report_path.write_text(
         report_html.render_html(
-            posts,
+            recipes,
             report_path.stem.removesuffix("_posts"),
             favicon_path.name,
         ),
@@ -66,17 +66,17 @@ def _render_reports(report_path: Path, posts: list[PostItem]) -> None:
         report_html.render_shopping_list_html(favicon_path.name), encoding="utf-8"
     )
     report_path.with_name("notes.html").write_text(
-        report_html.render_notes_html(posts, favicon_path.name), encoding="utf-8"
+        report_html.render_notes_html(recipes, favicon_path.name), encoding="utf-8"
     )
 
 
 
-def _load_report_posts(root: Path, factory: sessionmaker[Session]) -> list[PostItem]:
+def _load_report_recipes(root: Path, factory: sessionmaker[Session]) -> list[Recipe]:
     """Use the same recipe ordering as the importer when configuration exists."""
 
     config_path = root / "cookbook.toml"
     reverse = load_config(config_path).reverse if config_path.exists() else False
-    return load_posts(factory, reverse=reverse)
+    return load_recipes(factory, reverse=reverse)
 
 
 def _watch_and_render(
@@ -85,10 +85,10 @@ def _watch_and_render(
     """Poll database posts and renderer code, rebuilding only when they change."""
 
     renderer_path = Path(__file__).with_name("report_html.py")
-    previous: tuple[int, list[PostItem]] | None = None
+    previous: tuple[int, list[Recipe]] | None = None
     while True:
         try:
-            current = (renderer_path.stat().st_mtime_ns, _load_report_posts(report_path.parent, factory))
+            current = (renderer_path.stat().st_mtime_ns, _load_report_recipes(report_path.parent, factory))
             if current != previous:
                 _render_reports(report_path, current[1])
                 previous = current
@@ -249,7 +249,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
 
     imports = ImportService(
         root,
-        lambda: _render_reports(root / "lizapanelim_posts.html", _load_report_posts(root, factory)),
+        lambda: _render_reports(root / "lizapanelim_posts.html", _load_report_recipes(root, factory)),
     )
 
     class CookbookHandler(SimpleHTTPRequestHandler):
@@ -457,7 +457,7 @@ def main() -> None:
     load_dotenv(root / ".env")
     factory = create_session_factory()
     report_path = root / "lizapanelim_posts.html"
-    _render_reports(report_path, _load_report_posts(report_path.parent, factory))
+    _render_reports(report_path, _load_report_recipes(report_path.parent, factory))
     if args.reload:
         threading.Thread(
             target=_watch_and_render,
