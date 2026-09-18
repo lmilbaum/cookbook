@@ -17,9 +17,9 @@ def test_import_button_starts_once_and_shows_completion(page):
     page.route('http://cookbook.test/api/import-post', api)
     page.route('http://cookbook.test/api/recipe-state', lambda route: route.fulfill(
         json={'revision': 1, 'state': {'overrides': {}, 'custom': []}}))
-    page.route('http://cookbook.test/lizapanelim_posts.html', lambda route: route.fulfill(
+    page.route('http://cookbook.test/index.html', lambda route: route.fulfill(
         content_type='text/html', body=render_html([], 'example', 'favicon.svg')))
-    page.goto('http://cookbook.test/lizapanelim_posts.html')
+    page.goto('http://cookbook.test/index.html')
     button = page.get_by_role('button', name='Import next post from the end')
     page.wait_for_function("!document.getElementById('import-post').disabled")
     assert calls == ['GET']
@@ -30,7 +30,7 @@ def test_import_button_starts_once_and_shows_completion(page):
     page.locator('#import-refresh').wait_for(state='visible')
     assert not button.is_disabled()
     assert calls.count('POST') == 1
-    assert page.url == 'http://cookbook.test/lizapanelim_posts.html'
+    assert page.url == 'http://cookbook.test/index.html'
 
 
 def test_import_button_hidden_for_static_file(page, tmp_path):

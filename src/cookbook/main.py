@@ -289,7 +289,7 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
         json.dump(payload, file, ensure_ascii=False, indent=2)
 
     favicon_path = write_favicon(output_path)
-    html_path = output_path.with_suffix(".html")
+    html_path = output_path.with_name("index.html")
     html_path.write_text(
         render_html(
             report_recipes,

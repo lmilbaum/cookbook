@@ -7,7 +7,7 @@ uv sync
 make up
 ```
 
-Open http://localhost:8765/lizapanelim_posts.html. Compose starts PostgreSQL,
+Open http://localhost:8765/. Compose starts PostgreSQL,
 applies schema migrations, and serves database-backed cookbook pages.
 `make down` stops the services and retains the database volume.
 

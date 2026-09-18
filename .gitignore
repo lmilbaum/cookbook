@@ -8,7 +8,7 @@ __pycache__/
 *.py[cod]
 .ruff_cache/
 *_posts.json
-*_posts.html
+index.html
 shopping_list.html
 shopping_list.json
 shopping_list.json.tmp

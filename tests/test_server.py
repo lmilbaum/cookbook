@@ -184,7 +184,7 @@ def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     legacy = tmp_path / "lizapanelim_posts.json"
     legacy.write_text("invalid legacy JSON must not be read")
-    report = legacy.with_suffix(".html")
+    report = tmp_path / "index.html"
     item = Recipe(
         id="database-recipe", image_url="",
         caption="Database recipe caption", timestamp_utc="2026-01-01T00:00:00+00:00",
@@ -197,7 +197,7 @@ def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
     cached_image = assets / f"{item.id}.jpg"
     cached_image.write_bytes(b"cached image")
     insert_missing_recipes(factory, [item])
-    server._render_reports(report, load_recipes(factory, reverse=False))
+    server._render_reports(report, load_recipes(factory, reverse=False), assets)
     assert "Database recipe title" in report.read_text()
     assert "lizapanelim_posts_assets/database-recipe.jpg" in report.read_text()
     assert "expired.example" not in report.read_text()
@@ -206,7 +206,7 @@ def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
     assert (tmp_path / "notes.html").exists()
     assert (tmp_path / "shopping_list.html").exists()
     mark_not_recipe(factory, item.post.shortcode)
-    server._render_reports(report, load_recipes(factory, reverse=False))
+    server._render_reports(report, load_recipes(factory, reverse=False), assets)
     assert "Database recipe title" not in report.read_text()
     assert legacy.read_text() == "invalid legacy JSON must not be read"
     engine.dispose()
@@ -233,10 +233,10 @@ def test_reload_retries_database_failure_and_only_renders_changes(tmp_path, monk
             raise KeyboardInterrupt
 
     monkeypatch.setattr(server, "load_recipes", load)
-    monkeypatch.setattr(server, "_render_reports", lambda path, posts: rendered.append(posts))
+    monkeypatch.setattr(server, "_render_reports", lambda path, posts, assets_dir: rendered.append(posts))
     monkeypatch.setattr(server.time, "sleep", sleep)
     with pytest.raises(KeyboardInterrupt):
-        server._watch_and_render(tmp_path / "report.html", None)
+        server._watch_and_render(tmp_path / "report.html", None, tmp_path / "assets")
     assert rendered == [[], ["changed"]]
     assert "secret" not in capsys.readouterr().out
 
@@ -280,7 +280,7 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
 
     from cookbook.database import Base
 
-    (tmp_path / 'lizapanelim_posts.html').write_text('Cookbook')
+    (tmp_path / 'index.html').write_text('Cookbook')
     (tmp_path / '.env').write_text('private fixture')
     backups = tmp_path / '.private-backups'
     backups.mkdir()

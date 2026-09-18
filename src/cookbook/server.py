@@ -36,13 +36,16 @@ from .models import Recipe
 from .post_repository import load_recipes
 
 
-def _render_reports(report_path: Path, recipes: list[Recipe]) -> None:
+_HOME_PAGE_NAME = "index.html"
+_LEGACY_POSTS_BASENAME = "lizapanelim_posts"
+
+
+def _render_reports(report_path: Path, recipes: list[Recipe], assets_dir: Path) -> None:
     """Rebuild static pages from a database snapshot, leaving JSON exports alone."""
 
     from . import report_html  # Imported here so development reloads can refresh it.
 
     report_html = importlib.reload(report_html)
-    assets_dir = report_path.with_name(f"{report_path.stem}_assets")
     cached_assets = {
         asset.stem: asset
         for asset in sorted(assets_dir.glob("*"), reverse=True)
@@ -57,7 +60,7 @@ def _render_reports(report_path: Path, recipes: list[Recipe]) -> None:
     report_path.write_text(
         report_html.render_html(
             recipes,
-            report_path.stem.removesuffix("_posts"),
+            _LEGACY_POSTS_BASENAME.removesuffix("_posts"),
             favicon_path.name,
         ),
         encoding="utf-8",
@@ -79,8 +82,18 @@ def _load_report_recipes(root: Path, factory: sessionmaker[Session]) -> list[Rec
     return load_recipes(factory, reverse=reverse)
 
 
+def _report_assets_dir(root: Path) -> Path:
+    """Locate the cached-image directory tied to the scraper's JSON output."""
+
+    config_path = root / "cookbook.toml"
+    if config_path.exists():
+        output_stem = Path(load_config(config_path).output).stem
+        return root / f"{output_stem}_assets"
+    return root / f"{_LEGACY_POSTS_BASENAME}_assets"
+
+
 def _watch_and_render(
-    report_path: Path, factory: sessionmaker[Session]
+    report_path: Path, factory: sessionmaker[Session], assets_dir: Path
 ) -> None:
     """Poll database posts and renderer code, rebuilding only when they change."""
 
@@ -90,7 +103,7 @@ def _watch_and_render(
         try:
             current = (renderer_path.stat().st_mtime_ns, _load_report_recipes(report_path.parent, factory))
             if current != previous:
-                _render_reports(report_path, current[1])
+                _render_reports(report_path, current[1], assets_dir)
                 previous = current
                 print("Reload mode: updated report pages. Refresh the browser to view changes.")
         except SQLAlchemyError:
@@ -249,7 +262,9 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
 
     imports = ImportService(
         root,
-        lambda: _render_reports(root / "lizapanelim_posts.html", _load_report_recipes(root, factory)),
+        lambda: _render_reports(
+            root / _HOME_PAGE_NAME, _load_report_recipes(root, factory), _report_assets_dir(root)
+        ),
     )
 
     class CookbookHandler(SimpleHTTPRequestHandler):
@@ -262,16 +277,13 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             """Serve generated pages and images without exposing local data files."""
             path = unquote(urlsplit(self.path).path)
             if path == "/":
-                self.send_response(302)
-                self.send_header("Location", "/lizapanelim_posts.html")
-                self.end_headers()
-                return None
+                path = self.path = f"/{_HOME_PAGE_NAME}"
             candidate = (root / path.lstrip("/")).resolve()
             allowed = False
             if candidate.is_relative_to(root.resolve()):
                 relative = candidate.relative_to(root.resolve())
                 allowed = relative.as_posix() in {
-                    "lizapanelim_posts.html", "shopping_list.html", "notes.html", "favicon.svg",
+                    _HOME_PAGE_NAME, "shopping_list.html", "notes.html", "favicon.svg",
                 } or (
                     candidate.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
                     and relative.parts[0].endswith("_posts_assets")
@@ -456,16 +468,17 @@ def main() -> None:
     root = args.directory.resolve()
     load_dotenv(root / ".env")
     factory = create_session_factory()
-    report_path = root / "lizapanelim_posts.html"
-    _render_reports(report_path, _load_report_recipes(report_path.parent, factory))
+    report_path = root / _HOME_PAGE_NAME
+    assets_dir = _report_assets_dir(root)
+    _render_reports(report_path, _load_report_recipes(report_path.parent, factory), assets_dir)
     if args.reload:
         threading.Thread(
             target=_watch_and_render,
-            args=(report_path, factory),
+            args=(report_path, factory, assets_dir),
             daemon=True,
         ).start()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(root, factory))
-    url = f"http://{args.host}:{args.port}/lizapanelim_posts.html"
+    url = f"http://{args.host}:{args.port}/"
     print(f"Cookbook available at {url}")
     print("Shopping list saved to the database.")
     if not args.no_open:

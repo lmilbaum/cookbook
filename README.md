@@ -42,7 +42,7 @@ make up
 docker compose ps
 ```
 
-Open [the cookbook](http://localhost:8765/lizapanelim_posts.html).
+Open [the cookbook](http://localhost:8765/).
 Set `APP_PORT` in `.env` to change the web port. `make up` rebuilds the
 application image so Python code changes take effect.
 

@@ -375,9 +375,9 @@ def render_html(
       </div>
       <div class="import-feedback">
         <p id="import-status" role="status" aria-live="polite"></p>
-        <a id="import-refresh" href="lizapanelim_posts.html" hidden>Refresh cookbook</a>
+        <a id="import-refresh" href="index.html" hidden>Refresh cookbook</a>
       </div>
-      <a class="back-to-cookbook" href="lizapanelim_posts.html">חזרה לכל המתכונים</a>
+      <a class="back-to-cookbook" href="index.html">חזרה לכל המתכונים</a>
       <div class="source-filter" id="source-filter" role="group" aria-label="סינון לפי מקור">
         <span class="meta-label">מקור</span>
         <label><input type="checkbox" id="filter-lizapanelim" checked /> ליזה פאנלים</label>
@@ -510,7 +510,7 @@ def render_html(
         }};
         const updateCard = (card, recipe) => {{
           card.querySelector(".recipe-detail-link").textContent = recipe.title;
-          const detailUrl = `lizapanelim_posts.html?recipe=${{encodeURIComponent(recipe.id)}}`;
+          const detailUrl = `index.html?recipe=${{encodeURIComponent(recipe.id)}}`;
           card.querySelector(".recipe-detail-link").href = detailUrl;
           const source = card.querySelector(".source-link");
           const newSource = linkRow(safeLink(recipe.sourceUrl), "אינסטגרם", "source-link") || document.createElement("p");
@@ -562,7 +562,7 @@ def render_html(
           const prerequisiteLink = card.querySelector(".prerequisite-link");
           prerequisiteLink.hidden = !prerequisiteSelect.value;
           prerequisiteLink.href = prerequisiteSelect.value
-            ? `lizapanelim_posts.html?recipe=${{encodeURIComponent(prerequisiteSelect.value)}}`
+            ? `index.html?recipe=${{encodeURIComponent(prerequisiteSelect.value)}}`
             : "#";
           const imageBox = card.querySelector(".card-image"); imageBox.replaceChildren();
           const imageUrl = safeLink(recipe.imageUrl);
@@ -696,7 +696,7 @@ def render_html(
           state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); if (!await save(saveStatus)) return; grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
           applySourceFilter();
-          if (selectedRecipeId) window.location.href = "lizapanelim_posts.html";
+          if (selectedRecipeId) window.location.href = "index.html";
           else dialog.close();
         }});
       }})();
@@ -745,7 +745,7 @@ def render_notes_html(recipes: list[Recipe], favicon_href: str) -> str:
   </head>
   <body>
     <main>
-      <a href="lizapanelim_posts.html">Back to cookbook</a>
+      <a href="index.html">Back to cookbook</a>
       <h1 id="page-title">Recipe notes</h1>
       <p class="intro" id="intro">Notes are saved automatically.</p>
       <section class="notes-grid" id="notes-grid"></section>
@@ -830,7 +830,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
   </head>
   <body>
     <main>
-      <a class="back-link" href="lizapanelim_posts.html">Back to cookbook</a>
+      <a class="back-link" href="index.html">Back to cookbook</a>
       <section class="shopping-list" aria-labelledby="shopping-list-title">
         <h1 id="shopping-list-title">Shopping list</h1>
         <p>Add items, check them off, and keep the list in this browser.</p>
