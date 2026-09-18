@@ -75,11 +75,14 @@ def insert_missing_recipes(
 
 
 def mark_not_recipe(factory: sessionmaker[Session], shortcode: str) -> bool:
-    """Hide a known non-recipe post from generated cookbook reports."""
+    """Delete a post's recipe, keeping the post so the importer never re-fetches it."""
 
     with session_scope(factory) as session:
         post = session.get(Post, shortcode)
         if post is None:
             return False
         post.is_recipe = False
+        recipe = session.get(Recipe, shortcode)
+        if recipe is not None:
+            session.delete(recipe)
     return True

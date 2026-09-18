@@ -100,7 +100,7 @@ def test_recipe_with_no_post_is_always_visible() -> None:
     assert [recipe.id for recipe in load_recipes(factory, reverse=False)] == ["classic-applesauce"]
 
 
-def test_mark_not_recipe_excludes_a_post_from_reports_without_touching_the_recipe() -> None:
+def test_mark_not_recipe_deletes_the_recipe_but_keeps_the_post() -> None:
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -109,3 +109,19 @@ def test_mark_not_recipe_excludes_a_post_from_reports_without_touching_the_recip
 
     assert mark_not_recipe(factory, item.post.shortcode)
     assert load_recipes(factory, reverse=False) == []
+
+    with factory() as session:
+        # The recipe is gone, but the post survives so the importer's dedup
+        # (which scans posts.shortcode) never re-fetches this shortcode.
+        assert session.get(Recipe, "not-a-recipe") is None
+        post = session.get(Post, "not-a-recipe")
+        assert post is not None
+        assert post.is_recipe is False
+
+
+def test_mark_not_recipe_returns_false_for_an_unknown_shortcode() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    assert not mark_not_recipe(factory, "missing")

@@ -337,8 +337,9 @@ def render_html(
       .remove-ingredient {{ padding: 7px 9px; background: #7d2c32; color: #fff; }}
       .add-ingredient {{ justify-self: start; background: #2a2f3a; color: #eceef3; }}
       .form-actions {{ display: flex; justify-content: flex-end; gap: 8px; }}
+      .danger-actions {{ display: flex; gap: 8px; margin-right: auto; }}
       .secondary-button {{ background: #2a2f3a; color: #eceef3; }}
-      .danger-button {{ margin-right: auto; background: #7d2c32; color: #fff; }}
+      .danger-button {{ background: #7d2c32; color: #fff; }}
       .save-status {{ min-height: 1.25em; margin: 0; color: #92d3a2; font-size: .9rem; }}
       img {{
         display: block;
@@ -405,7 +406,10 @@ def render_html(
         <label>הוראות הכנה <textarea id="recipe-instructions" maxlength="10000" dir="rtl" placeholder="הקלידו כאן את הוראות ההכנה..."></textarea></label>
         <p class="save-status" id="save-status" aria-live="polite"></p>
         <div class="form-actions">
-          <button class="danger-button" id="delete-recipe" type="button">Delete</button>
+          <div class="danger-actions">
+            <button class="danger-button" id="not-recipe" type="button">Not a recipe</button>
+            <button class="danger-button" id="delete-recipe" type="button">Delete</button>
+          </div>
           <button class="secondary-button" id="cancel-recipe" type="button">Cancel</button>
           <button type="submit">Save</button>
         </div>
@@ -428,6 +432,7 @@ def render_html(
         const ingredientsEditorBody = document.getElementById("ingredients-editor-body");
         const instructionsInput = document.getElementById("recipe-instructions");
         const deleteButton = document.getElementById("delete-recipe");
+        const notRecipeButton = document.getElementById("not-recipe");
         const saveStatus = document.getElementById("save-status");
         const selectedRecipeId = new URLSearchParams(window.location.search).get("recipe");
         document.body.classList.add(selectedRecipeId ? "recipe-view" : "cookbook-view");
@@ -585,7 +590,8 @@ def render_html(
           const ingredients = normalizeIngredients(recipe.ingredients);
           (ingredients.length ? ingredients : [{{}}]).forEach(addIngredientRow);
           instructionsInput.value = recipe.instructions || "";
-          formTitle.textContent = recipe.id ? "עריכת המתכון" : "הוספת מתכון"; deleteButton.hidden = !isCustom; saveStatus.textContent = "";
+          formTitle.textContent = recipe.id ? "עריכת המתכון" : "הוספת מתכון"; deleteButton.hidden = !isCustom;
+          notRecipeButton.hidden = isCustom || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
           if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
         const sourceFilter = document.getElementById("source-filter");
@@ -695,6 +701,24 @@ def render_html(
           const id = idInput.value; if (!id || baseIds.has(id)) return;
           state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); if (!await save(saveStatus)) return; grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
+          applySourceFilter();
+          if (selectedRecipeId) window.location.href = "index.html";
+          else dialog.close();
+        }});
+        notRecipeButton.addEventListener("click", async () => {{
+          const id = idInput.value; if (!id || !baseIds.has(id)) return;
+          notRecipeButton.disabled = true;
+          saveStatus.textContent = "מסמן כלא מתכון…";
+          try {{
+            const response = await fetch(`/api/recipes/${{encodeURIComponent(id)}}/not-recipe`, {{ method: "POST" }});
+            if (!response.ok) throw new Error();
+          }} catch {{
+            saveStatus.textContent = "לא ניתן לסמן את הפוסט. נסו שוב.";
+            notRecipeButton.disabled = false;
+            return;
+          }}
+          state.order = state.order.filter((recipeId) => recipeId !== id);
+          grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           applySourceFilter();
           if (selectedRecipeId) window.location.href = "index.html";
           else dialog.close();

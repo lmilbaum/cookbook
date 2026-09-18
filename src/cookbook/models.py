@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, String, Text
-from sqlalchemy.orm import Mapped, MappedAsDataclass, mapped_column, relationship
+from sqlalchemy.orm import Mapped, MappedAsDataclass, foreign, mapped_column, relationship
 
 from .database import Base
 
@@ -45,7 +45,15 @@ class Recipe(MappedAsDataclass, Base, kw_only=True):
     source: Mapped[str] = mapped_column(String(32), default="lizapanelim")
     # One-directional on purpose: a Post -> Recipe back-reference would make
     # dataclasses.asdict()/equality recurse Recipe.post.recipe.post... forever.
-    post: Mapped[Post | None] = relationship(default=None)
+    #
+    # Not a real foreign key: a rejected recipe is deleted while its post is
+    # kept (so the importer's dedup still treats the shortcode as seen), so a
+    # post can outlive the recipe it once matched.
+    post: Mapped[Post | None] = relationship(
+        primaryjoin="Recipe.id == foreign(Post.shortcode)",
+        passive_deletes="all",
+        default=None,
+    )
 
 
 class Post(MappedAsDataclass, Base, kw_only=True):
@@ -53,7 +61,7 @@ class Post(MappedAsDataclass, Base, kw_only=True):
 
     __tablename__ = "posts"
 
-    shortcode: Mapped[str] = mapped_column(ForeignKey("recipes.id"), primary_key=True)
+    shortcode: Mapped[str] = mapped_column(Text, primary_key=True)
     url: Mapped[str] = mapped_column(Text)
     typename: Mapped[str] = mapped_column(String(128))
     is_video: Mapped[bool] = mapped_column(Boolean)

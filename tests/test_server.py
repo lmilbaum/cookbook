@@ -171,6 +171,40 @@ def test_database_shopping_api(tmp_path, monkeypatch) -> None:
     engine.dispose()
 
 
+def test_not_recipe_api_hides_post_and_regenerates_report(tmp_path) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from cookbook.database import Base
+    from cookbook.models import Post, Recipe
+    from cookbook.post_repository import insert_missing_recipes
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    item = Recipe(
+        id="database-recipe", image_url="",
+        caption="caption", timestamp_utc="2026-01-01T00:00:00+00:00", title="A recipe",
+    )
+    item.post = Post(shortcode="database-recipe", url="https://example.com/recipe", typename="GraphImage", is_video=False)
+    insert_missing_recipes(factory, [item])
+
+    handler_type = server.make_handler(tmp_path, factory)
+    handler = object.__new__(handler_type)
+    responses = []
+    handler._json_response = lambda status, payload: responses.append((status, payload))
+
+    handler.path = "/api/recipes/missing-recipe/not-recipe"
+    handler.do_POST()
+    assert responses.pop() == (404, {"error": "Not found"})
+
+    handler.path = "/api/recipes/database-recipe/not-recipe"
+    handler.do_POST()
+    assert responses.pop() == (200, {})
+    assert "A recipe" not in (tmp_path / "index.html").read_text()
+    engine.dispose()
+
+
 def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker

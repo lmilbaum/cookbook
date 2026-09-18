@@ -33,7 +33,7 @@ from .recipe_state_repository import (
 from .shopping_list_repository import load_shopping_state, save_shopping_list, valid_items, ShoppingListConflict
 
 from .models import Recipe
-from .post_repository import load_recipes
+from .post_repository import load_recipes, mark_not_recipe
 
 
 _HOME_PAGE_NAME = "index.html"
@@ -255,6 +255,7 @@ def _create_trello_card(items: list[dict[str, Any]]) -> dict[str, str]:
 
 _RECIPE_PAGE_PATH = re.compile(r"^/recipes/([^/]+)\.html$")
 _RECIPE_IMAGE_PATH = re.compile(r"^/recipes/assets/([^/]+)$")
+_NOT_RECIPE_PATH = re.compile(r"^/api/recipes/([^/]+)/not-recipe$")
 
 
 def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPRequestHandler]:
@@ -407,6 +408,22 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self._json_response(200, {"revision": revision})
 
         def do_POST(self) -> None:
+            not_recipe_match = _NOT_RECIPE_PATH.fullmatch(unquote(urlsplit(self.path).path))
+            if not_recipe_match:
+                try:
+                    marked = mark_not_recipe(factory, not_recipe_match.group(1))
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to update recipe"})
+                    return
+                if not marked:
+                    self._json_response(404, {"error": "Not found"})
+                    return
+                try:
+                    imports.refresh()
+                except (SQLAlchemyError, OSError, TypeError, ValueError):
+                    pass  # The change is persisted; the report will pick it up on the next render.
+                self._json_response(200, {})
+                return
             if urlsplit(self.path).path == "/api/import-post":
                 try:
                     if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
