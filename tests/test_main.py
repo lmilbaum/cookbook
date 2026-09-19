@@ -6,9 +6,8 @@ import json
 
 from cookbook.config import AppConfig
 from cookbook.main import _fetch_posts_with_fallback
-
-from cookbook.post_store_import import load_post_store
 from cookbook.models import Post, Recipe
+from cookbook.post_store_import import load_post_store
 
 
 def _flat_post_payload(shortcode: str, timestamp: str) -> dict[str, object]:

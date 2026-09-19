@@ -64,7 +64,7 @@ class ImportService:
                 status = {"status": "failed", "message": "Import failed. Check Instagram credentials and session access, then try again."}
         except subprocess.TimeoutExpired:
             status = {"status": "failed", "message": "Import timed out. Please try again later."}
-        except Exception:
+        except Exception:  # noqa: BLE001 - the worker thread must always record a final status.
             status = {"status": "failed", "message": "Unable to finish the import. Refresh the cookbook before retrying."}
         with self._lock:
             self._status = status

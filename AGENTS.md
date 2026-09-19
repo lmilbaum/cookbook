@@ -19,7 +19,7 @@ uv sync
 uv run pytest
 
 # Run a focused test file
-uv run pytest tests/test_report_html.py
+uv run pytest tests/test_site_pages.py
 
 # Run the command-line importer with the repository configuration
 uv run cookbook --config cookbook.toml
@@ -52,10 +52,15 @@ for the first time. Run pending local database migrations with
 ## Database and containers
 
 - Alembic migrations belong in `migrations/versions/`; never edit an existing
-  applied migration—add a new revision instead.
+  applied migration—add a new revision instead. `tests/test_migrations.py` enforces this: it
+  checks the hash of every applied migration, and requires a single linear chain
+  (a new revision's `down_revision` must be the current head). Ruff skips the old
+  files so autofix cannot rewrite them. When a new migration has been applied to a
+  real database, add its hash to that test.
 - `make up` rebuilds the application image and waits for health checks.
-- `make down` retains the PostgreSQL volume. Do not run Compose with
-  `--volumes` unless an intentional database reset is requested.
+- `make down` retains the PostgreSQL data, which lives in the git-ignored
+  `.postgres-data/` folder. Do not delete that folder unless an intentional
+  database reset is requested.
 
 ## Before handing off changes
 
@@ -63,3 +68,11 @@ for the first time. Run pending local database migrations with
 - Check `git diff --check` and ensure only intended files changed.
 - Update `README.md`, `QUICK_START.md`, or `BROWSER_SCRAPER.md` when commands,
   configuration, or user-facing behavior changes.
+
+## Bugs and regression tests
+
+- Every reported bug must end up covered by a regression test that reproduces the
+  scenario. Check that the test fails with the fix reverted, then restore the fix.
+  Prefer tests that exercise the real contract between layers (for example, run the
+  payload the page sends through the server's validator) over mocks that accept
+  anything.

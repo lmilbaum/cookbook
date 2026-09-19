@@ -8,7 +8,6 @@ from dataclasses import replace
 from pathlib import Path
 
 from dotenv import load_dotenv
-
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import create_session_factory

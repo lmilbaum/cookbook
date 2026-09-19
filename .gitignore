@@ -20,3 +20,4 @@ recipes/assets/
 *_titles.json
 recipe-state*.json
 .private-backups/
+.postgres-data/

@@ -7,34 +7,49 @@ import importlib
 import json
 import os
 import re
+import sys
 import threading
 import time
 import webbrowser
 from dataclasses import replace
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, ClassVar
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import load_config
 from .database import create_session_factory
 from .import_service import ImportService
+from .models import Recipe, RecipeState
+from .post_repository import load_recipes, mark_not_recipe
 from .recipe_image_repository import load_recipe_image
 from .recipe_page_repository import load_recipe_page
 from .recipe_state_repository import (
-    RecipeStateConflict, load_recipe_state, save_recipe_state,
+    RecipeStateConflict,
+    load_recipe_state,
+    save_recipe_state,
 )
-from .shopping_list_repository import load_shopping_state, save_shopping_list, valid_items, ShoppingListConflict
-
-from .models import Recipe
-from .post_repository import load_recipes, mark_not_recipe
-
+from .shopping_list_repository import (
+    ShoppingListConflict,
+    load_shopping_state,
+    save_shopping_list,
+    valid_items,
+)
+from .type_repository import (
+    DuplicateType,
+    create_type,
+    delete_type,
+    get_type,
+    list_types,
+    rename_type,
+)
 
 _HOME_PAGE_NAME = "index.html"
 _LEGACY_POSTS_BASENAME = "lizapanelim_posts"
@@ -43,9 +58,9 @@ _LEGACY_POSTS_BASENAME = "lizapanelim_posts"
 def _render_reports(report_path: Path, recipes: list[Recipe], assets_dir: Path) -> None:
     """Rebuild static pages from a database snapshot, leaving JSON exports alone."""
 
-    from . import report_html  # Imported here so development reloads can refresh it.
+    from . import site_pages  # Imported here so development reloads can refresh it.
 
-    report_html = importlib.reload(report_html)
+    site_pages = importlib.reload(site_pages)
     cached_assets = {
         asset.stem: asset
         for asset in sorted(assets_dir.glob("*"), reverse=True)
@@ -56,9 +71,9 @@ def _render_reports(report_path: Path, recipes: list[Recipe], assets_dir: Path) 
         if recipe.id in cached_assets else recipe
         for recipe in recipes
     ]
-    favicon_path = report_html.write_favicon(report_path)
+    favicon_path = site_pages.write_favicon(report_path)
     report_path.write_text(
-        report_html.render_html(
+        site_pages.render_html(
             recipes,
             _LEGACY_POSTS_BASENAME.removesuffix("_posts"),
             favicon_path.name,
@@ -66,10 +81,10 @@ def _render_reports(report_path: Path, recipes: list[Recipe], assets_dir: Path) 
         encoding="utf-8",
     )
     report_path.with_name("shopping_list.html").write_text(
-        report_html.render_shopping_list_html(favicon_path.name), encoding="utf-8"
+        site_pages.render_shopping_list_html(favicon_path.name), encoding="utf-8"
     )
     report_path.with_name("notes.html").write_text(
-        report_html.render_notes_html(recipes, favicon_path.name), encoding="utf-8"
+        site_pages.render_notes_html(recipes, favicon_path.name), encoding="utf-8"
     )
 
 
@@ -97,7 +112,7 @@ def _watch_and_render(
 ) -> None:
     """Poll database posts and renderer code, rebuilding only when they change."""
 
-    renderer_path = Path(__file__).with_name("report_html.py")
+    renderer_path = Path(__file__).with_name("site_pages.py")
     previous: tuple[int, list[Recipe]] | None = None
     while True:
         try:
@@ -256,6 +271,7 @@ def _create_trello_card(items: list[dict[str, Any]]) -> dict[str, str]:
 _RECIPE_PAGE_PATH = re.compile(r"^/recipes/([^/]+)\.html$")
 _RECIPE_IMAGE_PATH = re.compile(r"^/recipes/assets/([^/]+)$")
 _NOT_RECIPE_PATH = re.compile(r"^/api/recipes/([^/]+)/not-recipe$")
+_TYPES_PATH = re.compile(r"^/api/recipe-types(?:/(\d+))?$")
 
 
 def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPRequestHandler]:
@@ -269,7 +285,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
     )
 
     class CookbookHandler(SimpleHTTPRequestHandler):
-        extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".webp": "image/webp"}
+        extensions_map: ClassVar[dict[str, str]] = {**SimpleHTTPRequestHandler.extensions_map, ".webp": "image/webp"}
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, directory=str(root), **kwargs)
@@ -303,7 +319,59 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self.end_headers()
             self.wfile.write(body)
 
+        def _handle_types(self, method: str) -> bool:
+            """Serve /api/recipe-types[/<id>]; return False if the path is not a types route."""
+
+            match = _TYPES_PATH.fullmatch(urlsplit(self.path).path)
+            if not match:
+                return False
+            type_id = int(match.group(1)) if match.group(1) else None
+            allowed = {"GET", "POST"} if type_id is None else {"GET", "PUT", "DELETE"}
+            if method not in allowed:
+                self._json_response(405, {"error": "Method not allowed"})
+                return True
+            name = None
+            if method in {"POST", "PUT"}:
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 10_000:
+                        raise ValueError
+                    body = json.loads(self.rfile.read(length))
+                    if not isinstance(body, dict) or set(body) != {"name"}:
+                        raise ValueError
+                    name = body["name"]
+                except (ValueError, UnicodeDecodeError):
+                    self._json_response(400, {"error": "Expected a JSON object with a name"})
+                    return True
+            try:
+                if method == "GET" and type_id is None:
+                    self._json_response(200, list_types(factory))
+                elif method == "GET":
+                    record = get_type(factory, type_id)
+                    self._json_response(*((200, record) if record else (404, {"error": "Not found"})))
+                elif method == "POST":
+                    self._json_response(201, create_type(factory, name))
+                elif method == "PUT":
+                    record = rename_type(factory, type_id, name)
+                    self._json_response(*((200, record) if record else (404, {"error": "Not found"})))
+                else:
+                    deleted = delete_type(factory, type_id)
+                    self._json_response(*((200, {}) if deleted else (404, {"error": "Not found"})))
+            except DuplicateType:
+                self._json_response(409, {"error": "A type with this name already exists"})
+            except ValueError:
+                self._json_response(400, {"error": "Invalid type name"})
+            except SQLAlchemyError:
+                self._json_response(503, {"error": "Unable to access types"})
+            return True
+
+        def do_DELETE(self) -> None:
+            if not self._handle_types("DELETE"):
+                self._json_response(404, {"error": "Not found"})
+
         def do_GET(self) -> None:
+            if self._handle_types("GET"):
+                return
             request_path = unquote(urlsplit(self.path).path)
             recipe_image_match = _RECIPE_IMAGE_PATH.fullmatch(request_path)
             if recipe_image_match:
@@ -361,6 +429,8 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self._json_response(200, items)
 
         def do_PUT(self) -> None:
+            if self._handle_types("PUT"):
+                return
             if urlsplit(self.path).path == "/api/recipe-state":
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
@@ -408,6 +478,8 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             self._json_response(200, {"revision": revision})
 
         def do_POST(self) -> None:
+            if self._handle_types("POST"):
+                return
             not_recipe_match = _NOT_RECIPE_PATH.fullmatch(unquote(urlsplit(self.path).path))
             if not_recipe_match:
                 try:
@@ -468,6 +540,30 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
     return CookbookHandler
 
 
+def empty_database_warning(factory: sessionmaker[Session]) -> str | None:
+    """Explain how to recover if the database holds no recipes and no saved edits.
+
+    An empty database is normal on a first run but is also what remains after
+    Docker storage or the data folder is deleted, so say so loudly at startup.
+    """
+
+    try:
+        with factory() as session:
+            recipes = session.scalar(select(func.count()).select_from(Recipe))
+            states = session.scalar(select(func.count()).select_from(RecipeState))
+    except SQLAlchemyError:
+        return None
+    if recipes or states:
+        return None
+    return (
+        "WARNING: the database has no recipes and no saved recipe edits. If this is "
+        "unexpected (for example the database folder or Docker storage was deleted), "
+        "restore the newest dump in .private-backups/ with pg_restore, or re-import "
+        "posts with: uv run cookbook-import-post-store --store lizapanelim_posts_items. "
+        "Create backups regularly with: make backup"
+    )
+
+
 def main() -> None:
     """Run the local cookbook web server."""
 
@@ -485,6 +581,8 @@ def main() -> None:
     root = args.directory.resolve()
     load_dotenv(root / ".env")
     factory = create_session_factory()
+    if warning := empty_database_warning(factory):
+        print(warning, file=sys.stderr)
     report_path = root / _HOME_PAGE_NAME
     assets_dir = _report_assets_dir(root)
     _render_reports(report_path, _load_report_recipes(report_path.parent, factory), assets_dir)

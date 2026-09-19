@@ -14,11 +14,11 @@ from urllib.request import Request, urlopen
 from .api_method import InstagramUnauthorizedError, fetch_posts_api
 from .browser_scraper import fetch_posts_browser
 from .config import AppConfig, load_config, parse_args, resolve_from
+from .database import create_session_factory
 from .dependencies import load_dotenv_loader
 from .models import Recipe
-from .database import create_session_factory
 from .post_repository import insert_missing_recipes, load_recipes
-from .report_html import (
+from .site_pages import (
     render_html,
     render_notes_html,
     render_shopping_list_html,

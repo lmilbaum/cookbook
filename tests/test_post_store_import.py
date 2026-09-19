@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from cookbook.database import Base
 from cookbook.models import Recipe

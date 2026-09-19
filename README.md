@@ -48,7 +48,7 @@ application image so Python code changes take effect.
 
 The application mounts this checkout at `/data`, preserving imported recipes,
 and generated pages on the host. Shopping-list changes are stored in the
-PostgreSQL volume. The server generates pages from database posts on startup;
+PostgreSQL. The server generates pages from database posts on startup;
 Compose enables `--reload`, which polls for database and renderer changes every
 second. Recipe order follows `reverse` in the served directory’s `cookbook.toml`:
 `true` displays oldest first and `false` displays newest first (also the default
@@ -97,7 +97,7 @@ source of truth. They still generate JSON and HTML report files for the static
 web UI, but those files are not read back as post data.
 
 The schema also includes `ingredients` (one row per ingredient) and
-`shopping_list` (one row per item, referencing an ingredient, with optional
+`shopping_list_items` (one row per item, referencing an ingredient, with optional
 quantity and checked status). Shopping items are displayed alphabetically;
 there is no stored position. A separate revision record protects list updates. The shopping-list API now
 reads and writes PostgreSQL. Before starting the updated server, apply migrations
@@ -189,15 +189,17 @@ docker compose logs postgres
 make down
 ```
 
-The `postgres_data` named volume retains data when containers are stopped or
-removed with `make down`. Run `make up` to start
-again with the same data. `docker compose down --volumes` deletes the database
-data; use it only when intentionally resetting the development database.
+The database files live in the local `.postgres-data/` folder (git-ignored),
+not in a Docker volume, so pruning or resetting Docker storage does not delete
+them. They persist when containers are stopped or removed with `make down`; run
+`make up` to start again with the same data. To intentionally reset the
+development database, stop the services and delete `.postgres-data/`. Include
+this folder in your own backups.
 
-Initialization settings apply only to an empty volume. Changing credentials
+Initialization settings apply only to an empty data folder. Changing credentials
 in `.env` does not update an existing database's credentials.
 
-The image is pinned to PostgreSQL version 18.6. Its volume is mounted at
+The image is pinned to PostgreSQL version 18.6. Its data folder is mounted at
 `/var/lib/postgresql`, following the [official image's storage layout](https://hub.docker.com/_/postgres).
 Major-version upgrades require a database migration, not just changing the tag.
 
@@ -208,12 +210,21 @@ exports. Keep the original post JSON, title files, and cached images until you
 have verified your data. `make up` applies pending migrations automatically.
 
 ```sh
-mkdir -p .private-backups
-chmod 700 .private-backups
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > .private-backups/cookbook.dump
+make backup
 uv run pytest
 # Exercise migrations, concurrency, and reconnect persistence in a disposable schema:
 docker compose exec -T -e PYTHONPATH=/data/src app python /data/scripts/verify_postgres_migration.py
+```
+
+`make backup` writes a timestamped dump (`.private-backups/cookbook-YYYYmmdd-HHMMSS.dump`,
+readable only by you, git-ignored) and keeps the newest 30; change that with
+`make backup KEEP=10`. Run it before upgrades and before anything destructive,
+and copy the folder somewhere off this machine now and then. To restore, load a
+dump into a separate database first:
+
+```sh
+docker compose exec -T postgres createdb -U cookbook cookbook_restore
+docker compose exec -T postgres pg_restore -U cookbook -d cookbook_restore --no-owner < .private-backups/cookbook-<timestamp>.dump
 ```
 
 The verification script requires permission to create a schema and drops only its

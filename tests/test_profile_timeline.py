@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import pytest
 
-from cookbook.browser_scraper import IncompleteProfileError, _scroll_profile_until_complete, _select_unseen_media_paths
+from cookbook.browser_scraper import (
+    IncompleteProfileError,
+    _scroll_profile_until_complete,
+    _select_unseen_media_paths,
+)
 from cookbook.profile_timeline import ProfileTimeline
 
 

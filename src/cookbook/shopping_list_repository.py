@@ -46,7 +46,7 @@ def load_shopping_state(factory: sessionmaker[Session]) -> dict[str, int | list[
     """Read items and revision in one consistent transaction."""
     with session_scope(factory) as session:
         if session.get_bind().dialect.name == "postgresql":
-            session.execute(text("LOCK TABLE shopping_list_state, ingredients, shopping_list IN SHARE MODE"))
+            session.execute(text("LOCK TABLE shopping_list_states, ingredients, shopping_list_items IN SHARE MODE"))
         row = session.get(ShoppingListState, 1)
         # Bind the existing reader to this transaction.
         items = load_shopping_list(sessionmaker(bind=session.connection()))
@@ -61,7 +61,7 @@ def save_shopping_list(
         raise ValueError("Invalid revision")
     with session_scope(factory) as session:
         if session.get_bind().dialect.name == "postgresql":
-            session.execute(text("LOCK TABLE shopping_list_state, ingredients, shopping_list IN EXCLUSIVE MODE"))
+            session.execute(text("LOCK TABLE shopping_list_states, ingredients, shopping_list_items IN EXCLUSIVE MODE"))
         row = session.get(ShoppingListState, 1)
         current = row.revision if row else 0
         if revision is not None and revision != current:
@@ -117,7 +117,7 @@ def import_shopping_list(factory: sessionmaker[Session], items: list[ShoppingIte
 
     with session_scope(factory) as session:
         if session.get_bind().dialect.name == "postgresql":
-            session.execute(text("LOCK TABLE shopping_list_state, ingredients, shopping_list IN EXCLUSIVE MODE"))
+            session.execute(text("LOCK TABLE shopping_list_states, ingredients, shopping_list_items IN EXCLUSIVE MODE"))
         if session.get(ShoppingListState, 1) is not None or session.scalar(select(Ingredient.id).limit(1)) is not None:
             raise ValueError("Shopping-list storage is already in use; import refused.")
         _replace_items(session, items)

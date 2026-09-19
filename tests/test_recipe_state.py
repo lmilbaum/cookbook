@@ -1,38 +1,24 @@
 """Recipe state migration, validation, and HTTP concurrency tests."""
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
-from pathlib import Path
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from cookbook import server
+from cookbook.models import RecipeState
 from cookbook.recipe_state_repository import valid_state
 
 
 @pytest.fixture
 def storage():
-    path = Path(__file__).parents[1] / "migrations/versions/20260913_01_recipe_state.py"
-    spec = importlib.util.spec_from_file_location("recipe_state_migration", path)
-    assert spec and spec.loader
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
     engine = create_engine("sqlite://")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            migration.upgrade()
+    RecipeState.__table__.create(engine)
     yield sessionmaker(bind=engine)
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            migration.downgrade()
-        assert "recipe_state" not in inspect(connection).get_table_names()
     engine.dispose()
 
 
@@ -87,3 +73,23 @@ def test_api_preserves_edits_and_rejects_stale_saves(storage, tmp_path, monkeypa
 ])
 def test_invalid_state(state):
     assert not valid_state(state)
+
+
+def test_saved_types_list_is_validated():
+    base = {"overrides": {}, "custom": []}
+    assert valid_state({**base, "types": ["סלט", "עוגה"]})
+    assert not valid_state({**base, "types": "סלט"})
+    assert not valid_state({**base, "types": ["סלט", 1]})
+    assert not valid_state({**base, "types": ["  "]})
+
+
+def test_recipes_saved_from_the_page_are_valid():
+    """The page saves every recipe field, including source and type."""
+    recipe = {
+        "id": "r1", "title": "Soup", "sourceUrl": "", "source": "lizapanelim", "recipeUrl": "",
+        "recipeName": "", "recipeUrls": [], "recipeNames": [], "imageUrl": "", "ingredients": [],
+        "instructions": "", "type": "מרק", "prerequisiteId": "", "notes": "",
+    }
+    assert valid_state({"overrides": {"r1": recipe}, "custom": []})
+    assert valid_state({"overrides": {}, "custom": [recipe]})
+    assert not valid_state({"overrides": {"r1": {**recipe, "source": 1}}, "custom": []})

@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, String, Text
-from sqlalchemy.orm import Mapped, MappedAsDataclass, foreign, mapped_column, relationship
+from sqlalchemy.orm import (
+    Mapped,
+    MappedAsDataclass,
+    mapped_column,
+    relationship,
+)
 
 from .database import Base
 
@@ -19,10 +24,19 @@ class Ingredient(Base):
     name: Mapped[str] = mapped_column(Text, unique=True)
 
 
+class RecipeType(Base):
+    """A recipe type (salad, cake, soup...) that recipes and searches can use."""
+
+    __tablename__ = "recipe_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, unique=True)
+
+
 class ShoppingListItem(Base):
     """One item in the single shared shopping list."""
 
-    __tablename__ = "shopping_list"
+    __tablename__ = "shopping_list_items"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     ingredient_id: Mapped[int] = mapped_column(ForeignKey("ingredients.id"))
@@ -71,7 +85,7 @@ class Post(MappedAsDataclass, Base, kw_only=True):
 class RecipeState(Base):
     """Shared recipe overrides and custom recipes in the browser's format."""
 
-    __tablename__ = "recipe_state"
+    __tablename__ = "recipe_states"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     revision: Mapped[int] = mapped_column(Integer)
@@ -81,7 +95,7 @@ class RecipeState(Base):
 class ShoppingListState(Base):
     """Revision and durable initialization marker for the shared list."""
 
-    __tablename__ = "shopping_list_state"
+    __tablename__ = "shopping_list_states"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     revision: Mapped[int] = mapped_column(Integer)

@@ -9,7 +9,7 @@ make up
 
 Open http://localhost:8765/. Compose starts PostgreSQL,
 applies schema migrations, and serves database-backed cookbook pages.
-`make down` stops the services and retains the database volume.
+`make down` stops the services and retains the database (stored in the local `.postgres-data/` folder). `make backup` saves a timestamped dump to `.private-backups/`.
 
 ## Import existing data
 

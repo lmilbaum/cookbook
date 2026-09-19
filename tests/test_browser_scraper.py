@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from cookbook.browser_scraper import _fetch_post_details, _select_unseen_media_paths
-from test_shopping_browser import page
 
 
 def test_select_position_from_end_uses_only_unseen_posts() -> None:
@@ -37,6 +36,7 @@ def test_scroll_continues_past_3000_posts(monkeypatch):
 
 def test_scroll_limit_never_returns_a_partial_feed(monkeypatch):
     import pytest
+
     from cookbook import browser_scraper as scraper
     sequence = iter(range(5000))
     monkeypatch.setattr(scraper, '_extract_media_paths', lambda *_: [f'/p/post-{next(sequence)}/'])

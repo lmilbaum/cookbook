@@ -10,7 +10,6 @@ from alembic import context
 from cookbook.database import Base, database_url
 from cookbook.models import Post  # noqa: F401 - registers metadata with Base.
 
-
 config = context.config
 if config.config_file_name is not None and Path(config.config_file_name).is_file():
     fileConfig(config.config_file_name)

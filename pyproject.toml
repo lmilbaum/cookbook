@@ -37,3 +37,8 @@ prepend_sys_path = ["."]
 dev = [
     "pytest==9.1.1",
 ]
+
+[tool.ruff]
+# Applied migrations are frozen (see tests/test_migrations.py); keep linters and
+# autofixes from rewriting them.
+extend-exclude = ["migrations/versions/2026090*.py", "migrations/versions/2026091[0-8]_*.py"]

@@ -201,7 +201,6 @@ def render_html(
         )
 
     base_recipes_json = json.dumps(base_recipes, ensure_ascii=False).replace("<", "\\u003c")
-    safe_username = html.escape(username)
     safe_favicon_href = html.escape(favicon_href, quote=True)
 
     return f"""<!doctype html>
@@ -234,11 +233,11 @@ def render_html(
       .page-header h1 {{ margin: 0; text-align: right; direction: rtl; }}
       .back-to-cookbook {{ display: none; margin-bottom: 14px; text-align: right; direction: rtl; }}
       .recipe-view .back-to-cookbook {{ display: block; }}
-      .source-filter {{ display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 0 0 16px; padding: 10px 12px; border: 1px solid #303644; border-radius: 9px; background: #12151b; direction: rtl; }}
-      .source-filter span.meta-label {{ margin: 0; }}
-      .source-filter label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; }}
-      .recipe-view .source-filter {{ display: none; }}
       .no-filter-results {{ color: #929baa; }}
+      .recipe-search {{ display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 0 16px; padding: 12px; border: 1px solid #303644; border-radius: 9px; background: #12151b; direction: rtl; }}
+      .recipe-search label {{ display: flex; flex-direction: column; gap: 4px; flex: 1 1 160px; }}
+      .recipe-search select {{ padding: 9px 10px; font: inherit; color: inherit; border: 1px solid #303644; border-radius: 8px; background: #0f1115; }}
+      .recipe-view .recipe-search {{ display: none; }}
       .link-row {{
         margin: 0 0 10px;
       }}
@@ -325,6 +324,11 @@ def render_html(
       .recipe-form h2 {{ margin: 0; }}
       .recipe-form label {{ display: grid; gap: 6px; color: #cbd1dc; }}
       .recipe-form input {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
+      .type-combobox {{ position: relative; }}
+      .type-combobox ul {{ position: absolute; inset-inline: 0; top: 100%; z-index: 5; box-sizing: border-box; margin: 4px 0 0; padding: 4px; list-style: none; max-height: 220px; overflow-y: auto; border: 1px solid #3a414f; border-radius: 8px; background: #171a21; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }}
+      .type-combobox li {{ padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: right; }}
+      .type-combobox li:hover, .type-combobox li[aria-selected="true"] {{ background: #252b38; }}
+      .type-combobox li.new {{ color: #8db7ff; }}
       .recipe-form select {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .recipe-form textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .ingredients-editor {{ display: grid; gap: 8px; }}
@@ -379,10 +383,9 @@ def render_html(
         <a id="import-refresh" href="index.html" hidden>Refresh cookbook</a>
       </div>
       <a class="back-to-cookbook" href="index.html">חזרה לכל המתכונים</a>
-      <div class="source-filter" id="source-filter" role="group" aria-label="סינון לפי מקור">
-        <span class="meta-label">מקור</span>
-        <label><input type="checkbox" id="filter-lizapanelim" checked /> ליזה פאנלים</label>
-        <label><input type="checkbox" id="filter-other" checked /> אחר</label>
+      <div class="recipe-search" id="recipe-search" role="search" aria-label="חיפוש מתכונים">
+        <label>סוג <select id="search-type"><option value="">הכל</option></select></label>
+        <label>מקור <select id="search-source"><option value="">הכל</option><option value="lizapanelim">ליזה פאנלים</option><option value="unknown">לא ידוע</option></select></label>
       </div>
       <section class=\"grid\" id=\"recipe-grid\"></section>
       <p class="no-filter-results" id="no-filter-results" hidden>אין מתכונים התואמים לסינון.</p>
@@ -392,6 +395,13 @@ def render_html(
         <h2 id="recipe-form-title">Add recipe</h2>
         <input id="recipe-id" type="hidden" />
         <label>Recipe name <input id="recipe-title" type="text" maxlength="160" required /></label>
+        <div class="type-field">
+          <label for="recipe-type">סוג מתכון</label>
+          <div class="type-combobox">
+            <input id="recipe-type" type="text" role="combobox" aria-expanded="false" aria-controls="recipe-type-list" aria-autocomplete="list" autocomplete="off" maxlength="60" dir="rtl" placeholder="בחרו סוג או הקלידו סוג חדש ולחצו Enter" />
+            <ul id="recipe-type-list" role="listbox" aria-label="סוגי מתכונים" hidden></ul>
+          </div>
+        </div>
         <label>Recipe link <input id="recipe-url" type="url" placeholder="https://..." /></label>
         <label>Source link <input id="source-url" type="url" placeholder="https://..." /></label>
         <label>Image link <input id="image-url" type="text" placeholder="https://..." /></label>
@@ -431,6 +441,79 @@ def render_html(
         const imageUrlInput = document.getElementById("image-url");
         const ingredientsEditorBody = document.getElementById("ingredients-editor-body");
         const instructionsInput = document.getElementById("recipe-instructions");
+        const typeInput = document.getElementById("recipe-type");
+        const typeList = document.getElementById("recipe-type-list");
+        const unknownType = "לא ידוע";
+        let typeNames = [];
+        const recipeType = (recipe) => (recipe.type || "").trim() || unknownType;
+        const knownTypes = (extra) => [...new Set([unknownType, extra, ...typeNames, ...[...grid.querySelectorAll("[data-recipe-id]")].map((card) => recipeType(recipeFromCard(card)))].filter(Boolean))].sort((a, b) => a.localeCompare(b, "he"));
+        let typeItems = [];
+        let typeActive = -1;
+        let typeFiltering = false;
+        const typeCanBeCreated = () => {{
+          const value = typeInput.value.trim();
+          return !!value && !knownTypes("").some((type) => type.toLowerCase() === value.toLowerCase());
+        }};
+        const closeTypeList = () => {{ typeList.hidden = true; typeInput.setAttribute("aria-expanded", "false"); typeActive = -1; }};
+        const renderTypeList = () => {{
+          const query = typeFiltering ? typeInput.value.trim().toLowerCase() : "";
+          typeItems = knownTypes("").filter((type) => !query || type.toLowerCase().includes(query)).map((name) => ({{ name, create: false }}));
+          if (typeFiltering && typeCanBeCreated()) typeItems.push({{ name: typeInput.value.trim(), create: true }});
+          typeActive = Math.min(typeActive, typeItems.length - 1);
+          typeList.replaceChildren(...typeItems.map((item, index) => {{
+            const option = document.createElement("li");
+            option.role = "option"; option.dataset.index = index;
+            option.textContent = item.create ? `הוספת "${{item.name}}"` : item.name;
+            option.classList.toggle("new", item.create);
+            option.setAttribute("aria-selected", String(index === typeActive));
+            return option;
+          }}));
+          typeList.hidden = !typeItems.length;
+          typeInput.setAttribute("aria-expanded", String(!typeList.hidden));
+        }};
+        const addTypeName = async (name) => {{
+          if (name === unknownType || typeNames.includes(name)) return;
+          typeNames.push(name);
+          if (hosted) await fetch("/api/recipe-types", {{ method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify({{ name }}) }}).catch(() => {{}});
+          if (typeof refreshTypeOptions === "function") refreshTypeOptions();
+        }};
+        const chooseType = async (name) => {{
+          typeInput.value = name; typeFiltering = false; closeTypeList();
+          await addTypeName(name);
+          const id = idInput.value;
+          const card = id && grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`);
+          if (!card) return;
+          const recipe = {{ ...recipeFromCard(card), type: name }};
+          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
+          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
+          save(saveStatus); updateCard(card, recipe);
+        }};
+        const openTypeList = () => {{ typeActive = -1; renderTypeList(); }};
+        typeInput.addEventListener("focus", () => {{ typeFiltering = false; openTypeList(); }});
+        typeInput.addEventListener("click", () => {{ if (typeList.hidden) {{ typeFiltering = false; openTypeList(); }} }});
+        typeInput.addEventListener("input", () => {{ typeFiltering = true; typeActive = -1; renderTypeList(); }});
+        typeInput.addEventListener("blur", closeTypeList);
+        typeInput.addEventListener("keydown", (event) => {{
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {{
+            event.preventDefault();
+            if (typeList.hidden) openTypeList();
+            if (!typeItems.length) return;
+            typeActive = (typeActive + (event.key === "ArrowDown" ? 1 : -1) + typeItems.length) % typeItems.length;
+            renderTypeList();
+            typeList.children[typeActive]?.scrollIntoView({{ block: "nearest" }});
+          }} else if (event.key === "Enter") {{
+            event.preventDefault();
+            const name = typeActive >= 0 ? typeItems[typeActive].name : typeInput.value.trim();
+            if (name) chooseType(name);
+          }} else if (event.key === "Escape" && !typeList.hidden) {{
+            event.stopPropagation(); closeTypeList();
+          }}
+        }});
+        typeList.addEventListener("mousedown", (event) => {{
+          event.preventDefault(); // Keep focus in the input so blur does not close the list first.
+          const option = event.target.closest("li");
+          if (option) chooseType(typeItems[Number(option.dataset.index)].name);
+        }});
         const deleteButton = document.getElementById("delete-recipe");
         const notRecipeButton = document.getElementById("not-recipe");
         const saveStatus = document.getElementById("save-status");
@@ -444,6 +527,12 @@ def render_html(
         state.overrides ||= {{}};
         state.custom ||= [];
         {_RECIPE_STATE_SCRIPT}
+        if (hosted) {{
+          try {{
+            const response = await fetch("/api/recipe-types", {{ cache: "no-store" }});
+            if (response.ok) typeNames = (await response.json()).map((type) => type.name);
+          }} catch {{}}
+        }}
         const allRecipes = () => baseRecipes
           .map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}), recipeName: state.overrides[recipe.id]?.recipeName || recipe.recipeName }}))
           .concat(state.custom);
@@ -584,7 +673,7 @@ def render_html(
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
         const openEditor = (recipe, isCustom, inline = false) => {{
-          form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; recipeUrlInput.value = recipe.recipeUrl || "";
+          form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; typeInput.value = recipeType(recipe); closeTypeList(); recipeUrlInput.value = recipe.recipeUrl || "";
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
           ingredientsEditorBody.replaceChildren();
           const ingredients = normalizeIngredients(recipe.ingredients);
@@ -594,23 +683,31 @@ def render_html(
           notRecipeButton.hidden = isCustom || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
           if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
-        const sourceFilter = document.getElementById("source-filter");
-        const filterLizapanelim = document.getElementById("filter-lizapanelim");
-        const filterOther = document.getElementById("filter-other");
         const noFilterResults = document.getElementById("no-filter-results");
+        const searchForm = document.getElementById("recipe-search");
+        const searchType = document.getElementById("search-type");
+        const searchSource = document.getElementById("search-source");
+        const refreshTypeOptions = () => {{
+          const types = knownTypes("");
+          const selected = searchType.value;
+          searchType.replaceChildren(new Option("הכל", ""), ...types.map((type) => new Option(type, type)));
+          searchType.value = types.includes(selected) ? selected : "";
+        }};
         const applySourceFilter = () => {{
           if (selectedRecipeId) return;
-          const showLiza = filterLizapanelim.checked;
-          const showOther = filterOther.checked;
+          refreshTypeOptions();
+          const criteria = {{ type: searchType.value, source: searchSource.value }};
           let anyVisible = false;
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{
-            const visible = recipeFromCard(card).source === "lizapanelim" ? showLiza : showOther;
+            const recipe = recipeFromCard(card);
+            const visible = (!criteria.type || recipeType(recipe) === criteria.type)
+              && (!criteria.source || (recipe.source === "lizapanelim" ? "lizapanelim" : "unknown") === criteria.source);
             card.hidden = !visible;
             if (visible) anyVisible = true;
           }});
           noFilterResults.hidden = anyVisible || !grid.children.length;
         }};
-        sourceFilter.addEventListener("change", applySourceFilter);
+        searchForm.addEventListener("change", applySourceFilter);
         const recipesById = new Map(allRecipes().map((recipe) => [recipe.id, recipe]));
         state.order.forEach((id) => grid.append(createCard(recipesById.get(id))));
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
@@ -624,7 +721,7 @@ def render_html(
             openEditor(recipeFromCard(selectedCard), !baseIds.has(selectedRecipeId), true);
           }}
         }}
-        if (!grid.children.length) grid.innerHTML = "<p>No posts found.</p>";
+        if (!grid.children.length) grid.innerHTML = "<p>No recipes found.</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
         if (savedScrollPosition !== null) {{
           sessionStorage.removeItem(scrollStorageKey);
@@ -632,7 +729,7 @@ def render_html(
           requestAnimationFrame(restoreScroll);
           window.addEventListener("load", restoreScroll, {{ once: true }});
         }}
-        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", prerequisiteId: "", notes: "", source: "other" }}, true));
+        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown" }}, true));
         document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
         document.getElementById("cancel-recipe").addEventListener("click", () => dialog.close());
         grid.addEventListener("input", (event) => {{
@@ -683,11 +780,13 @@ def render_html(
               [...row.querySelectorAll("input[data-field]")].map((input) => [input.dataset.field, input.value.trim()])
             )).filter((item) => item.name || item.varieties || item.amount),
             instructions: instructionsInput.value.trim(),
+            type: typeInput.value.trim() || unknownType,
             prerequisiteId: previous.prerequisiteId || "",
             notes: previous.notes || "",
-            source: previous.source || "other",
+            source: previous.source || "unknown",
           }};
           if (!recipe.title) return;
+          await addTypeName(recipe.type);
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
           if (!state.order.includes(recipe.id)) state.order.push(recipe.id);

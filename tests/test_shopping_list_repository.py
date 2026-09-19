@@ -2,32 +2,23 @@
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from cookbook.models import Ingredient, ShoppingListItem, ShoppingListState
-from cookbook.shopping_list_repository import ShoppingItem, load_shopping_list, save_shopping_list
+from cookbook.shopping_list_repository import (
+    ShoppingItem,
+    load_shopping_list,
+    save_shopping_list,
+)
 
 
 def test_migration_and_shopping_list_lifecycle() -> None:
-    path = Path(__file__).parents[1] / "migrations/versions/20260911_01_shopping_lists.py"
-    spec = importlib.util.spec_from_file_location("shopping_list_migration", path)
-    assert spec is not None and spec.loader is not None
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
     engine = create_engine("sqlite://")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            migration.upgrade()
-
-    ShoppingListState.__table__.create(engine)
+    for model in (Ingredient, ShoppingListItem, ShoppingListState):
+        model.__table__.create(engine)
     factory = sessionmaker(bind=engine)
     assert load_shopping_list(factory) == []
     items: list[ShoppingItem] = [
@@ -58,11 +49,6 @@ def test_migration_and_shopping_list_lifecycle() -> None:
     with factory() as session:
         assert len(session.scalars(select(Ingredient)).all()) == 2
 
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            migration.downgrade()
-        assert "shopping_list" not in inspect(connection).get_table_names()
-        assert "ingredients" not in inspect(connection).get_table_names()
     engine.dispose()
 
 
@@ -87,7 +73,11 @@ def test_import_refuses_to_overwrite_or_resurrect_items() -> None:
 
 def test_empty_import_is_initialized_and_stale_saves_fail():
     from cookbook.database import Base
-    from cookbook.shopping_list_repository import import_shopping_list, load_shopping_state, ShoppingListConflict
+    from cookbook.shopping_list_repository import (
+        ShoppingListConflict,
+        import_shopping_list,
+        load_shopping_state,
+    )
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

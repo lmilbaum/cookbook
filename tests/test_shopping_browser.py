@@ -3,22 +3,7 @@ from __future__ import annotations
 
 import json
 
-import pytest
-from playwright.sync_api import sync_playwright
-
-from cookbook.report_html import render_shopping_list_html
-
-
-@pytest.fixture
-def page():
-    with sync_playwright() as playwright:
-        try:
-            browser = playwright.chromium.launch()
-        except Exception as error:
-            pytest.skip(f"Chromium unavailable: {type(error).__name__}")
-        page = browser.new_page()
-        yield page
-        browser.close()
+from cookbook.site_pages import render_shopping_list_html
 
 
 def test_queued_saves_preserve_legacy_and_reject_conflicts(page):

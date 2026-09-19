@@ -33,7 +33,7 @@ def classify_source(recipe: Recipe) -> str:
     url = recipe.recipe_url.strip()
     if not url or _is_lizapanelim_url(url):
         return "lizapanelim"
-    return "other"
+    return "unknown"
 
 
 def load_recipes(factory: sessionmaker[Session], reverse: bool) -> list[Recipe]:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from cookbook.database import create_database_engine, database_url
 from cookbook.config import parse_args
+from cookbook.database import create_database_engine, database_url
 
 
 def test_database_url_uses_psycopg_for_plain_postgresql_url(monkeypatch: pytest.MonkeyPatch) -> None:

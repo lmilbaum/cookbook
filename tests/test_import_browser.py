@@ -1,8 +1,7 @@
 """Verify the import button uses the application API and never imports on load."""
 from __future__ import annotations
 
-from cookbook.report_html import render_html
-from test_shopping_browser import page
+from cookbook.site_pages import render_html
 
 
 def test_import_button_starts_once_and_shows_completion(page):

@@ -23,7 +23,7 @@ class ProfileTimeline:
         except (ValueError, TypeError):
             # Other GraphQL responses need not be JSON timeline pages.
             return
-        except Exception:
+        except Exception:  # noqa: BLE001
             # A failed response must never turn a partial scan into a complete one.
             return
 

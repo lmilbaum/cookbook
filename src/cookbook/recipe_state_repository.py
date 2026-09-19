@@ -18,13 +18,13 @@ class RecipeStateConflict(ValueError):
 def valid_state(value: object) -> bool:
     """Validate the existing browser format before storing it."""
 
-    if not isinstance(value, dict) or set(value) - {"overrides", "custom", "order"}:
+    if not isinstance(value, dict) or set(value) - {"overrides", "custom", "order", "types"}:
         return False
     overrides, custom = value.get("overrides"), value.get("custom")
     if not isinstance(overrides, dict) or not isinstance(custom, list):
         return False
     strings = {"id", "title", "recipeUrl", "recipeName", "sourceUrl", "imageUrl",
-               "instructions", "prerequisiteId", "notes", "timestamp"}
+               "instructions", "type", "source", "prerequisiteId", "notes", "timestamp"}
     arrays = {"recipeUrls", "recipeNames"}
     for recipe in [*overrides.values(), *custom]:
         if not isinstance(recipe, dict) or set(recipe) - strings - arrays - {"ingredients"}:
@@ -42,6 +42,9 @@ def valid_state(value: object) -> bool:
                     or set(ingredient) - {"name", "varieties", "amount"}
                     or not all(isinstance(x, str) for x in ingredient.values())):
                     return False
+    types = value.get("types", [])
+    if not isinstance(types, list) or not all(isinstance(x, str) and x.strip() for x in types):
+        return False
     ids = [recipe.get("id") for recipe in custom]
     if any(not isinstance(id_, str) or not id_ or id_ in overrides for id_ in ids):
         return False
@@ -69,7 +72,7 @@ def save_recipe_state(factory: sessionmaker[Session], state: dict[str, Any], rev
         raise ValueError("Invalid recipe state")
     with session_scope(factory) as session:
         if session.get_bind().dialect.name == "postgresql":
-            session.execute(text("LOCK TABLE recipe_state IN EXCLUSIVE MODE"))
+            session.execute(text("LOCK TABLE recipe_states IN EXCLUSIVE MODE"))
         row = session.get(RecipeState, 1)
         if revision != (row.revision if row else 0):
             raise RecipeStateConflict("Recipe state changed; reload before saving.")

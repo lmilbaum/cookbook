@@ -12,7 +12,11 @@ from sqlalchemy.orm import sessionmaker
 from cookbook import import_service, post_import_job, server
 from cookbook.database import Base
 from cookbook.models import Post, Recipe
-from cookbook.post_repository import insert_missing_recipes, load_recipes, mark_not_recipe
+from cookbook.post_repository import (
+    insert_missing_recipes,
+    load_recipes,
+    mark_not_recipe,
+)
 
 
 def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, monkeypatch):

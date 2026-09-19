@@ -211,7 +211,11 @@ def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
 
     from cookbook.database import Base
     from cookbook.models import Post, Recipe
-    from cookbook.post_repository import insert_missing_recipes, load_recipes, mark_not_recipe
+    from cookbook.post_repository import (
+        insert_missing_recipes,
+        load_recipes,
+        mark_not_recipe,
+    )
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -278,6 +282,7 @@ def test_reload_retries_database_failure_and_only_renders_changes(tmp_path, monk
 def test_report_order_honors_config_and_reload_changes(tmp_path):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from cookbook.database import Base
     from cookbook.models import Recipe
     from cookbook.post_repository import insert_missing_recipes
@@ -305,8 +310,9 @@ def test_report_order_honors_config_and_reload_changes(tmp_path):
 def test_static_serving_blocks_local_data_and_backups(tmp_path):
     import threading
     from http.server import ThreadingHTTPServer
-    from urllib.request import urlopen
     from urllib.error import HTTPError
+    from urllib.request import urlopen
+
     import pytest
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -352,8 +358,9 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
 def test_recipe_page_served_from_database(tmp_path, monkeypatch) -> None:
     import threading
     from http.server import ThreadingHTTPServer
-    from urllib.request import urlopen
     from urllib.error import HTTPError
+    from urllib.request import urlopen
+
     import pytest
     from sqlalchemy import create_engine
     from sqlalchemy.exc import SQLAlchemyError
@@ -396,8 +403,9 @@ def test_recipe_page_served_from_database(tmp_path, monkeypatch) -> None:
 def test_recipe_image_served_from_database(tmp_path, monkeypatch) -> None:
     import threading
     from http.server import ThreadingHTTPServer
-    from urllib.request import urlopen
     from urllib.error import HTTPError
+    from urllib.request import urlopen
+
     import pytest
     from sqlalchemy import create_engine
     from sqlalchemy.exc import SQLAlchemyError
@@ -435,3 +443,47 @@ def test_recipe_image_served_from_database(tmp_path, monkeypatch) -> None:
         http.server_close()
         thread.join()
         engine.dispose()
+
+
+def _factory():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from cookbook.models import Recipe, RecipeState
+
+    engine = create_engine("sqlite://")
+    for model in (Recipe, RecipeState):
+        model.__table__.create(engine)
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def test_warns_loudly_when_the_database_is_empty() -> None:
+    """Regression: deleting Docker storage silently produced an empty cookbook."""
+    warning = server.empty_database_warning(_factory())
+
+    assert warning is not None
+    assert "make backup" in warning and ".private-backups" in warning
+    assert "cookbook-import-post-store" in warning
+
+
+def test_no_warning_once_the_database_has_recipes_or_saved_edits() -> None:
+    from cookbook.models import Recipe, RecipeState
+
+    with_recipe = _factory()
+    with with_recipe() as session:
+        session.add(Recipe(id="r1", image_url="", caption="", timestamp_utc="t"))
+        session.commit()
+    assert server.empty_database_warning(with_recipe) is None
+
+    with_state = _factory()
+    with with_state() as session:
+        session.add(RecipeState(id=1, revision=1, payload={"overrides": {}, "custom": []}))
+        session.commit()
+    assert server.empty_database_warning(with_state) is None
+
+
+def test_no_warning_when_the_database_cannot_be_read() -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    assert server.empty_database_warning(sessionmaker(bind=create_engine("sqlite://"))) is None

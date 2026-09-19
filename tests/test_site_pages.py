@@ -6,7 +6,7 @@ import json
 import unittest
 
 from cookbook.models import Post, Recipe
-from cookbook.report_html import (
+from cookbook.site_pages import (
     _recipe_name_from_url,
     _title_for_recipe,
     render_html,
@@ -228,7 +228,7 @@ class RenderHtmlTests(unittest.TestCase):
     def test_empty_report_still_contains_add_recipe_interface(self) -> None:
         document = render_html([], "user", "favicon.svg")
 
-        self.assertIn("<p>No posts found.</p>", document)
+        self.assertIn("<p>No recipes found.</p>", document)
         self.assertIn('id="add-recipe"', document)
         self.assertIn('id="recipe-dialog"', document)
 
@@ -246,31 +246,38 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('["/lizapanelim_posts_assets/", "/recipes/"]', document)
         self.assertIn("`${window.location.origin}${url.pathname.slice", document)
 
-    def test_renders_source_filter_for_liza_panelim_and_other(self) -> None:
+    def test_search_uses_type_and_source_dropdowns_that_filter_immediately(self) -> None:
         document = render_html([make_recipe()], "user", "favicon.svg")
 
-        self.assertIn('id="source-filter"', document)
-        self.assertIn('id="filter-lizapanelim" checked /> ליזה פאנלים', document)
-        self.assertIn('id="filter-other" checked /> אחר', document)
-        self.assertIn('id="no-filter-results"', document)
-        self.assertIn(".recipe-view .source-filter { display: none; }", document)
-        self.assertIn('sourceFilter.addEventListener("change", applySourceFilter)', document)
-        self.assertIn('recipeFromCard(card).source === "lizapanelim" ? showLiza : showOther', document)
+        self.assertIn('id="search-type"', document)
+        self.assertIn('id="search-source"', document)
+        self.assertNotIn('חיפוש</button>', document)
+        self.assertIn('id="recipe-type"', document)
+        self.assertNotIn('id="source-filter"', document)
+        self.assertIn('searchForm.addEventListener("change", applySourceFilter)', document)
+        self.assertIn('const unknownType = "לא ידוע"', document)
+        self.assertIn("type: typeInput.value.trim() || unknownType", document)
+        self.assertIn('role="combobox"', document)
+        self.assertNotIn('<select id="recipe-type"', document)
+        self.assertIn("typeNames.push(name)", document)
+        self.assertIn('const types = knownTypes("");', document)
+        self.assertIn('typeNames = (await response.json()).map((type) => type.name)', document)
+        self.assertIn('event.key === "Enter"', document)
 
     def test_base_recipe_source_is_passed_through_from_the_recipe_unchanged(self) -> None:
         document = render_html(
-            [make_recipe(id="other-site-recipe", source="other")],
+            [make_recipe(id="other-site-recipe", source="unknown")],
             "user",
             "favicon.svg",
         )
 
-        self.assertIn('"id": "other-site-recipe", "title": "Saved title", "sourceUrl": "https://www.instagram.com/p/recipe-1/", "source": "other"', document)
+        self.assertIn('"id": "other-site-recipe", "title": "Saved title", "sourceUrl": "https://www.instagram.com/p/recipe-1/", "source": "unknown"', document)
 
-    def test_custom_recipes_default_to_the_other_source_bucket(self) -> None:
+    def test_custom_recipes_default_to_the_unknown_source_bucket(self) -> None:
         document = render_html([make_recipe()], "user", "favicon.svg")
 
-        self.assertIn('openEditor({ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", prerequisiteId: "", notes: "", source: "other" }, true)', document)
-        self.assertIn('source: previous.source || "other"', document)
+        self.assertIn('openEditor({ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown" }, true)', document)
+        self.assertIn('source: previous.source || "unknown"', document)
 
     def test_shopping_list_displays_items_alphabetically(self) -> None:
         document = render_shopping_list_html("favicon.svg")

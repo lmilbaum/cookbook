@@ -18,7 +18,9 @@ from sqlalchemy.orm import sessionmaker
 from cookbook.database import database_url
 from cookbook.recipe_state_repository import load_recipe_state, save_recipe_state
 from cookbook.shopping_list_repository import (
-    ShoppingListConflict, load_shopping_state, save_shopping_list,
+    ShoppingListConflict,
+    load_shopping_state,
+    save_shopping_list,
 )
 
 
@@ -36,7 +38,7 @@ def main() -> None:
         command.upgrade(config, "20260913_01")
         with engine.begin() as connection:
             connection.execute(text("INSERT INTO ingredients (name) VALUES ('Migration test')"))
-            connection.execute(text("INSERT INTO shopping_list (id, ingredient_id, done) VALUES ('test', 1, false)"))
+            connection.execute(text("INSERT INTO shopping_list_items (id, ingredient_id, done) VALUES ('test', 1, false)"))
         command.upgrade(config, "head")
         factory = sessionmaker(bind=engine)
         before = load_shopping_state(factory)

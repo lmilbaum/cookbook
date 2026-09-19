@@ -51,7 +51,7 @@ def test_classify_source_prefers_instagram_origin_over_recipe_link_domain() -> N
     assert classify_source(_bare_recipe("no-post-local", recipe_url="recipes/apple_cake.html")) == "lizapanelim"
     assert classify_source(_bare_recipe("no-post-liza", recipe_url="https://lizapanelim.com/x/")) == "lizapanelim"
     assert classify_source(_bare_recipe("no-post-www-liza", recipe_url="https://www.lizapanelim.com/x/")) == "lizapanelim"
-    assert classify_source(_bare_recipe("no-post-other", recipe_url="https://www.marthastewart.com/x")) == "other"
+    assert classify_source(_bare_recipe("no-post-other", recipe_url="https://www.marthastewart.com/x")) == "unknown"
 
 
 def test_inserted_recipes_are_classified_by_instagram_origin_first() -> None:
@@ -67,7 +67,7 @@ def test_inserted_recipes_are_classified_by_instagram_origin_first() -> None:
 
     recipes_by_id = {recipe.id: recipe for recipe in load_recipes(factory, reverse=True)}
     assert recipes_by_id["posted-elsewhere"].source == "lizapanelim"
-    assert recipes_by_id["never-posted"].source == "other"
+    assert recipes_by_id["never-posted"].source == "unknown"
 
 
 def test_recipes_are_inserted_once_and_loaded_in_report_order() -> None:
