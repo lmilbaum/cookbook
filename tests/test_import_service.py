@@ -52,7 +52,7 @@ def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, mo
 @pytest.mark.parametrize('code,status', [(0, 'succeeded'), (3, 'empty'), (1, 'failed'), (4, 'failed')])
 def test_worker_outcomes_do_not_expose_scraper_output(tmp_path, monkeypatch, code, status):
     refreshed = []
-    monkeypatch.setattr(import_service, 'run_scraper', lambda root: code)
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (code, ''))
     service = import_service.ImportService(tmp_path, lambda: refreshed.append(True))
     service._run()
     assert service.status()['status'] == status
@@ -64,7 +64,7 @@ def test_worker_rejects_overlapping_requests_and_allows_retry(tmp_path, monkeypa
     def run(*args, **kwargs):
         entered.set()
         release.wait(3)
-        return 3
+        return 3, ''
     monkeypatch.setattr(import_service, 'run_scraper', run)
     service = import_service.ImportService(tmp_path, lambda: None)
     assert service.start()
@@ -128,10 +128,62 @@ def test_timeout_terminates_browser_process_group(tmp_path, monkeypatch):
     def popen(command, **kwargs):
         assert command[1:3] == ['-m', 'cookbook.post_import_job']
         assert kwargs['start_new_session'] is True
-        assert kwargs['stdout'] == kwargs['stderr'] == subprocess.DEVNULL
+        assert kwargs['stdout'] == subprocess.DEVNULL and kwargs['stderr'] == subprocess.PIPE
         return Process()
     monkeypatch.setattr(import_service.subprocess, 'Popen', popen)
     monkeypatch.setattr(import_service.os, 'killpg', lambda pid, sig: killed.append(pid))
     with pytest.raises(subprocess.TimeoutExpired):
         import_service.run_scraper(tmp_path)
     assert killed == [12345]
+
+
+def test_failed_import_logs_the_scraper_output_and_shows_only_the_safe_reason(tmp_path, monkeypatch, capsys):
+    """Regression: a failed import gave no clue why, because the scraper's output was discarded."""
+    errors = (
+        "Traceback ... password=hunter2 ...\n"
+        f"{import_service.REASON_PREFIX}Instagram did not confirm the profile pagination end; no post selected.\n"
+    )
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (4, errors))
+    service = import_service.ImportService(tmp_path, lambda: None)
+    service._run()
+
+    message = service.status()['message']
+    assert 'Instagram did not confirm the profile pagination end' in message
+    assert 'hunter2' not in message and 'Traceback' not in message
+    logged = capsys.readouterr().err
+    assert 'exited with code 4' in logged and 'Instagram did not confirm' in logged
+
+
+def test_failed_import_without_a_reason_keeps_the_generic_message(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (1, 'Traceback: boom'))
+    service = import_service.ImportService(tmp_path, lambda: None)
+    service._run()
+
+    assert 'boom' not in service.status()['message']
+    assert 'Traceback: boom' in capsys.readouterr().err
+
+
+def test_job_reports_why_the_scan_was_incomplete(tmp_path, monkeypatch, capsys):
+    def incomplete(root, factory):
+        raise post_import_job.IncompleteProfileError('Profile pagination data was incomplete; no post selected.')
+    monkeypatch.setattr(post_import_job, 'import_next_post', incomplete)
+    monkeypatch.setattr(post_import_job, 'create_session_factory', lambda: None)
+    monkeypatch.setattr(post_import_job, 'load_dotenv', lambda *args: None)
+    monkeypatch.setattr('sys.argv', ['job', '--directory', str(tmp_path)])
+
+    with pytest.raises(SystemExit) as exit_info:
+        post_import_job.main()
+
+    assert exit_info.value.code == 4
+    assert f"{import_service.REASON_PREFIX}Profile pagination data was incomplete" in capsys.readouterr().err
+
+
+def test_run_scraper_returns_the_job_stderr(tmp_path, monkeypatch):
+    class Process:
+        returncode = 4
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def communicate(self, timeout=None): return None, 'reason text'
+    monkeypatch.setattr(import_service.subprocess, 'Popen', lambda command, **kwargs: Process())
+
+    assert import_service.run_scraper(tmp_path) == (4, 'reason text')

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .browser_scraper import IncompleteProfileError, fetch_posts_browser
 from .config import load_config, resolve_from
 from .database import create_session_factory
+from .import_service import REASON_PREFIX
 from .main import _cache_images_for_report
 from .models import Post
 from .post_repository import insert_missing_recipes
@@ -47,7 +49,8 @@ def main() -> None:
     load_dotenv(root / ".env")
     try:
         imported = import_next_post(root, create_session_factory())
-    except IncompleteProfileError:
+    except IncompleteProfileError as error:
+        print(f"{REASON_PREFIX}{error}", file=sys.stderr)
         raise SystemExit(4) from None
     raise SystemExit(0 if imported else 3)
 
