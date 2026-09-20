@@ -17,7 +17,7 @@ def test_import_button_starts_once_and_shows_completion(page):
     page.route('http://cookbook.test/api/recipe-state', lambda route: route.fulfill(
         json={'revision': 1, 'state': {'overrides': {}, 'custom': []}}))
     page.route('http://cookbook.test/index.html', lambda route: route.fulfill(
-        content_type='text/html', body=render_html([], 'example', 'favicon.svg')))
+        content_type='text/html', body=render_html([], 'example', 'favicon.svg', locale='en')))
     page.goto('http://cookbook.test/index.html')
     button = page.get_by_role('button', name='Import next post from the end')
     page.wait_for_function("!document.getElementById('import-post').disabled")
@@ -34,6 +34,6 @@ def test_import_button_starts_once_and_shows_completion(page):
 
 def test_import_button_hidden_for_static_file(page, tmp_path):
     report = tmp_path / 'cookbook.html'
-    report.write_text(render_html([], 'example', 'favicon.svg'))
+    report.write_text(render_html([], 'example', 'favicon.svg', locale='en'))
     page.goto(report.as_uri())
     assert page.locator('#import-controls').is_hidden()

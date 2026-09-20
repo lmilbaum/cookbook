@@ -20,7 +20,7 @@ def test_queued_saves_preserve_legacy_and_reject_conflicts(page):
                           json={"revision": payload["revision"] + 1})
     page.route("http://cookbook.test/api/shopping-list", api)
     page.route("http://cookbook.test/shopping_list.html", lambda route: route.fulfill(
-        content_type="text/html", body=render_shopping_list_html("favicon.svg")))
+        content_type="text/html", body=render_shopping_list_html("favicon.svg", locale="en")))
     page.goto("http://cookbook.test/shopping_list.html")
     page.wait_for_function("!document.getElementById('shopping-item-input').disabled")
     page.evaluate("""() => {
@@ -47,7 +47,7 @@ def test_failed_load_disables_editing_and_retains_browser_copy(page):
     page.add_init_script('localStorage.setItem("cookbook-shopping-list", "[]")')
     page.route("http://cookbook.test/api/shopping-list", lambda route: route.fulfill(status=503, json={}))
     page.route("http://cookbook.test/shopping_list.html", lambda route: route.fulfill(
-        content_type="text/html", body=render_shopping_list_html("favicon.svg")))
+        content_type="text/html", body=render_shopping_list_html("favicon.svg", locale="en")))
     page.goto("http://cookbook.test/shopping_list.html")
     page.wait_for_function("document.getElementById('shopping-item-input').disabled")
     assert "Unable to load" in page.locator("#export-status").inner_text()

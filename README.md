@@ -18,7 +18,7 @@ these individual imports.
 
 Imports run in the background and may take several minutes while the scraper
 scrolls the profile. The button shows progress and prevents overlapping jobs
-across tabs. After success, use **Refresh cookbook** to see the post; the app
+across tabs. After success, use **רענון ספר המתכונים** (Refresh cookbook) to see the post; the app
 does not reload the page automatically while you may be editing. Failures and
 an exhausted feed are shown in the page. Jobs time out after 30 minutes. A server
 restart interrupts an active job; refresh the cookbook before retrying.
@@ -28,6 +28,22 @@ install it with `uv run playwright install chromium`. Instagram credentials must
 already be configured in the local `.env`; login challenges may still require
 restoring a valid session. This button is available only on the hosted cookbook.
 Opening a page never starts an import.
+
+## Interface language
+
+The generated pages are Hebrew (`<html lang="he" dir="rtl">`). All interface
+text lives in `src/cookbook/i18n.py`, with Hebrew and English tables that must
+define the same keys; the `render_*` functions in `site_pages.py` take a
+`locale` argument (default `he`; `en` renders left to right). To add a
+language, add a table and a `LOCALES` entry—`tests/test_i18n.py` checks that
+every key and placeholder is present.
+
+Only interface text is translated. Recipe titles, ingredients, instructions,
+notes, and shopping items are stored and shown exactly as written, and each
+one picks its own text direction, so English recipes read correctly on the
+Hebrew page. The default recipe type `לא ידוע` is stored data, so it is the
+same in every locale. Recipe-type names, Trello board and card names, and
+server API messages are not part of the translated interface.
 
 ## Local application environment
 

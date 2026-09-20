@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 
+from cookbook.i18n import Translator as get_translator
 from cookbook.models import Post, Recipe
 from cookbook.site_pages import (
     _recipe_name_from_url,
@@ -135,9 +136,9 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('ingredientsBox.hidden = false', document)
         self.assertIn(': [{ name: "", varieties: "", amount: "" }]', document)
         self.assertIn(r'.split(/\r?\n/)', document)
-        self.assertIn('<section class="recipe-notes"><h3>הערות</h3><textarea aria-label="הערות למתכון"></textarea>', document)
-        self.assertIn('.edit-recipe { display: block; margin: 0 0 10px auto; padding: 0; background: transparent; color: #8db7ff;', document)
-        self.assertIn('<h3>הוראות הכנה</h3><pre></pre>', document)
+        self.assertIn('<section class="recipe-notes"><h3>הערות</h3><textarea dir="auto" aria-label="הערות למתכון"></textarea>', document)
+        self.assertIn('.edit-recipe { display: block; margin: 0 0 10px; margin-inline-end: auto; padding: 0; background: transparent; color: #8db7ff;', document)
+        self.assertIn('<h3>הוראות הכנה</h3><pre dir="auto"></pre>', document)
         self.assertIn('<span>דרוש הכנה של</span><select aria-label="דרוש הכנה של">', document)
         self.assertIn('class="prerequisite-link">למתכון</a>', document)
         self.assertIn('`index.html?recipe=${encodeURIComponent(prerequisiteSelect.value)}`', document)
@@ -181,11 +182,11 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertNotIn('id="recipe-notes"', cookbook)
         self.assertIn('const scrollStorageKey = "cookbook-main-scroll-position"', cookbook)
         self.assertIn("window.scrollTo(0, Number(savedScrollPosition) || 0)", cookbook)
-        self.assertIn("<title>Recipe notes</title>", notes)
+        self.assertIn("<title>הערות למתכון</title>", notes)
         self.assertIn('class="notes-grid"', notes)
         self.assertIn('new URLSearchParams(window.location.search).get("id")', notes)
         self.assertIn('candidate.id === recipeId', notes)
-        self.assertIn('input.dir = "rtl"', notes)
+        self.assertIn('input.dir = "auto"', notes)
         self.assertIn('localStorage.setItem(hosted ? backupKey : storageKey, JSON.stringify(snapshot))', notes)
 
     def test_renders_empty_title_element_so_existing_card_can_be_edited(self) -> None:
@@ -228,7 +229,7 @@ class RenderHtmlTests(unittest.TestCase):
     def test_empty_report_still_contains_add_recipe_interface(self) -> None:
         document = render_html([], "user", "favicon.svg")
 
-        self.assertIn("<p>No recipes found.</p>", document)
+        self.assertIn("<p>לא נמצאו מתכונים.</p>", document)
         self.assertIn('id="add-recipe"', document)
         self.assertIn('id="recipe-dialog"', document)
 
@@ -306,7 +307,7 @@ def test_recipe_save_feedback_is_local_and_temporary() -> None:
     cookbook = render_html([make_recipe()], "user", "favicon.svg")
     notes = render_notes_html([make_recipe()], "favicon.svg")
     for document in (cookbook, notes):
-        assert 'report("Saved.", true)' in document
+        assert f'report({get_translator().js("saved")}, true)' in document
         assert 'clearTimeout(target.saveTimer)' in document
         assert 'statusVersions.get(target) === version' in document
         assert 'persistenceStatus.hidden = true' in document

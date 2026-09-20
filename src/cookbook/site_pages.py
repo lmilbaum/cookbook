@@ -7,7 +7,12 @@ import json
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from .i18n import DEFAULT_LOCALE, Translator
 from .models import Recipe
+
+# Stored as a recipe's type when none is chosen. It is data, not a UI string, so it
+# stays the same in every locale.
+_UNKNOWN_TYPE = "לא ידוע"
 
 
 def _recipe_name_from_url(recipe_url: str) -> str:
@@ -45,7 +50,7 @@ _RECIPE_STATE_SCRIPT = r"""
         let pendingSave = Promise.resolve();
         const backupKey = `${storageKey}-backup-${Date.now()}`;
         const persistSnapshot = async (snapshot) => {
-          if (blocked) throw new Error("Reload before saving again. Your browser backup is retained.");
+          if (blocked) throw new Error(@@recipes_reload_blocked@@);
           const response = await fetch("/api/recipe-state", {
             method: "PUT", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ state: snapshot, revision }),
@@ -53,8 +58,8 @@ _RECIPE_STATE_SCRIPT = r"""
           if (!response.ok) {
             blocked = true;
             throw new Error(response.status === 409
-              ? "Recipes changed in another tab. Reload before saving. Your browser backup is retained."
-              : "Database save failed. Your browser backup is retained. Reload to retry.");
+              ? @@recipes_conflict@@
+              : @@recipes_save_failed@@);
           }
           revision = (await response.json()).revision;
         };
@@ -71,7 +76,7 @@ _RECIPE_STATE_SCRIPT = r"""
             }
           } catch {
             persistenceStatus.hidden = false;
-            persistenceStatus.textContent = "Unable to load recipes. Reload to retry; browser data is retained.";
+            persistenceStatus.textContent = @@recipes_load_failed@@;
             document.querySelectorAll("button, input, textarea, select").forEach((control) => control.disabled = true);
             return;
           }
@@ -96,23 +101,28 @@ _RECIPE_STATE_SCRIPT = r"""
             backupSaved = false;
           }
           if (!hosted) {
-            report(backupSaved ? "Saved." : "Unable to save in this browser.", backupSaved);
+            report(backupSaved ? @@saved@@ : @@recipes_browser_save_failed@@, backupSaved);
             return Promise.resolve(backupSaved);
           }
-          report("Saving…");
+          report(@@saving@@);
           pendingSave = pendingSave.then(async () => {
             try {
               await persistSnapshot(snapshot);
-              report("Saved.", true);
+              report(@@saved@@, true);
               return true;
             } catch (error) {
               blocked = true;
-              report(backupSaved ? error.message : "Save failed and browser backup is unavailable. Keep this page open and copy your edits.");
+              report(backupSaved ? error.message : @@recipes_save_unrecoverable@@);
               return false;
             }
           });
           return pendingSave;
         };
+"""
+
+
+_FORMAT_SCRIPT = r"""
+        const fmt = (template, values) => template.replace(/\{(\w+)\}/g, (_, key) => values[key]);
 """
 
 
@@ -143,14 +153,14 @@ _IMPORT_POST_SCRIPT = r"""
             show(await response.json());
           } catch {
             button.disabled = true;
-            status.textContent = "Unable to check import status. Reconnecting…";
+            status.textContent = @@import_status_unavailable@@;
             timer = setTimeout(check, 3000);
           }
         };
         button.addEventListener("click", async () => {
           button.disabled = true;
           refresh.hidden = true;
-          status.textContent = "Starting import…";
+          status.textContent = @@import_starting@@;
           try {
             const response = await fetch("/api/import-post", {
               method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
@@ -172,9 +182,11 @@ def render_html(
     username: str,
     favicon_href: str,
     titles: dict[str, str] | None = None,
+    locale: str = DEFAULT_LOCALE,
 ) -> str:
     """Render fetched recipes into a standalone HTML document."""
 
+    t = Translator(locale)
     titles = titles or {}
     base_recipes: list[dict[str, object]] = []
     for recipe in recipes:
@@ -202,13 +214,35 @@ def render_html(
 
     base_recipes_json = json.dumps(base_recipes, ensure_ascii=False).replace("<", "\\u003c")
     safe_favicon_href = html.escape(favicon_href, quote=True)
+    card_template = (
+        '<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2>'
+        f'<div class="card-meta" aria-label="{t.html("recipe_links")}">'
+        f'<span class="meta-label">{t.html("filter_source")}</span><p class="link-row source-link"></p>'
+        f'<span class="meta-label">{t.html("recipes")}</span><div class="recipe-links"></div></div></header>'
+        f'<div class="recipe-prerequisite"><span>{t.html("prerequisite")}</span>'
+        f'<select aria-label="{t.html("prerequisite")}"></select>'
+        f'<a class="prerequisite-link">{t.html("to_recipe")}</a>'
+        '<span class="prerequisite-status" aria-live="polite"></span></div>'
+        f'<section class="recipe-ingredients"><h3>{t.html("ingredients")}</h3>'
+        '<table class="ingredients-table"><thead><tr>'
+        f'<th scope="col">{t.html("ingredient_name")}</th>'
+        f'<th scope="col">{t.html("ingredient_varieties")}</th>'
+        f'<th scope="col">{t.html("ingredient_amount")}</th>'
+        '</tr></thead><tbody></tbody></table></section>'
+        f'<section class="recipe-instructions"><h3>{t.html("instructions")}</h3><pre dir="auto"></pre></section>'
+        f'<section class="recipe-notes"><h3>{t.html("notes")}</h3>'
+        f'<textarea dir="auto" aria-label="{t.html("recipe_notes")}"></textarea>'
+        '<p class="recipe-notes-status" aria-live="polite"></p></section>'
+        f'<button class="edit-recipe" type="button">{t.html("edit_recipe")}</button>'
+        '<div class="card-image"></div>'
+    )
 
     return f"""<!doctype html>
-<html lang=\"en\">
+<html lang="{t.lang}" dir="{t.direction}">
   <head>
     <meta charset=\"UTF-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-    <title>ספר המתכונים שלי</title>
+    <title>{t.html('app_title')}</title>
     <link rel=\"icon\" type=\"image/svg+xml\" href=\"{safe_favicon_href}\" />
     <style>
       body {{
@@ -225,16 +259,16 @@ def render_html(
       h1 {{
         margin: 0 0 8px;
       }}
-      .page-header {{ display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }}
+      .page-header {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }}
       .header-actions {{ display: flex; flex-wrap: wrap; gap: 8px; }}
       .import-feedback {{ margin: 8px 0 16px; }}
       .import-feedback p {{ margin: 0 0 6px; }}
       button:disabled {{ opacity: .6; cursor: wait; }}
-      .page-header h1 {{ margin: 0; text-align: right; direction: rtl; }}
-      .back-to-cookbook {{ display: none; margin-bottom: 14px; text-align: right; direction: rtl; }}
+      .page-header h1 {{ margin: 0; }}
+      .back-to-cookbook {{ display: none; margin-bottom: 14px; }}
       .recipe-view .back-to-cookbook {{ display: block; }}
       .no-filter-results {{ color: #929baa; }}
-      .recipe-search {{ display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 0 16px; padding: 12px; border: 1px solid #303644; border-radius: 9px; background: #12151b; direction: rtl; }}
+      .recipe-search {{ display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 0 16px; padding: 12px; border: 1px solid #303644; border-radius: 9px; background: #12151b; }}
       .recipe-search label {{ display: flex; flex-direction: column; gap: 4px; flex: 1 1 160px; }}
       .recipe-search select {{ padding: 9px 10px; font: inherit; color: inherit; border: 1px solid #303644; border-radius: 8px; background: #0f1115; }}
       .recipe-view .recipe-search {{ display: none; }}
@@ -256,11 +290,11 @@ def render_html(
       }}
       .shopping-list-link:hover {{ background: #a8c8ff; }}
       .shopping-list-link:focus-visible {{ outline: 3px solid #eceef3; outline-offset: 3px; }}
-      .card-header {{ display: grid; justify-items: end; gap: 10px; margin-bottom: 14px; }}
-      .card-meta {{ display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 12px; width: fit-content; max-width: 100%; border: 1px solid #303644; border-radius: 9px; padding: 10px 12px; background: #12151b; direction: rtl; text-align: right; }}
+      .card-header {{ display: grid; justify-items: start; gap: 10px; margin-bottom: 14px; }}
+      .card-meta {{ display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 12px; width: fit-content; max-width: 100%; border: 1px solid #303644; border-radius: 9px; padding: 10px 12px; background: #12151b; }}
       .meta-label {{ color: #929baa; font-size: .82rem; font-weight: 600; line-height: 1.45; }}
-      .source-link {{ min-width: 0; text-align: right; direction: rtl; }}
-      .recipe-links {{ display: grid; gap: 5px; min-width: 0; text-align: right; }}
+      .source-link {{ min-width: 0; }}
+      .recipe-links {{ display: grid; gap: 5px; min-width: 0; }}
       .card-meta .link-row {{ margin: 0; overflow-wrap: anywhere; }}
       .card-meta a {{ text-underline-offset: 3px; }}
       .card-title a {{ color: inherit; text-decoration: none; }}
@@ -273,27 +307,27 @@ def render_html(
       .cookbook-view .edit-recipe {{ display: none; }}
       .cookbook-view .card-header {{ margin-bottom: 12px; }}
       .cookbook-view .card-image img {{ margin: 0; }}
-      .recipe-view .card-image {{ display: flex; justify-content: flex-end; }}
+      .recipe-view .card-image {{ display: flex; justify-content: flex-start; }}
       .recipe-view .card-image a {{ width: min(220px, 100%); }}
       .recipe-view .card-image img {{ max-height: 220px; margin: 0; }}
       .recipe-view .edit-recipe {{ display: none; }}
-      .recipe-view .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; direction: rtl; text-align: right; }}
+      .recipe-view .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; }}
       .recipe-view .recipe-form h2 {{ font-size: 1.05rem; }}
       .recipe-view .recipe-form .secondary-button {{ display: none; }}
-      .recipe-notes {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
+      .recipe-notes {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
       .recipe-notes h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-notes textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #171a21; color: #eceef3; font: inherit; }}
       .recipe-notes-status {{ min-height: 1.25em; margin: 6px 0 0; color: #92d3a2; font-size: .85rem; }}
-      .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
+      .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
       .recipe-instructions h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-instructions pre {{ margin: 0; }}
-      .recipe-ingredients {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; text-align: right; direction: rtl; }}
+      .recipe-ingredients {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
       .recipe-ingredients h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .ingredients-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
-      .ingredients-table th, .ingredients-table td {{ padding: 8px 10px; border: 1px solid #3a414f; text-align: right; overflow-wrap: anywhere; }}
+      .ingredients-table th, .ingredients-table td {{ padding: 8px 10px; border: 1px solid #3a414f; text-align: start; overflow-wrap: anywhere; }}
       .ingredients-table th {{ background: #242936; color: #eceef3; }}
       .ingredients-table td {{ color: #cbd1dc; }}
-      .recipe-prerequisite {{ display: flex; align-items: center; gap: 10px; margin: 12px 0; color: #cbd1dc; text-align: right; direction: rtl; white-space: nowrap; }}
+      .recipe-prerequisite {{ display: flex; align-items: center; gap: 10px; margin: 12px 0; color: #cbd1dc; white-space: nowrap; }}
       .recipe-prerequisite select {{ width: min(240px, 100%); min-width: 0; flex: 0 1 240px; border: 1px solid #aeb6c4; border-radius: 7px; padding: 9px 11px; background: #f3f5f8; color: #20242c; font: inherit; }}
       .recipe-prerequisite select:focus {{ outline: 3px solid rgb(141 183 255 / 35%); border-color: #8db7ff; }}
       .prerequisite-link {{ flex: none; color: #8db7ff; }}
@@ -312,10 +346,9 @@ def render_html(
         margin: 0;
         font-size: 1.2rem;
         line-height: 1.25;
-        text-align: right;
       }}
       button {{ border: 0; border-radius: 7px; padding: 9px 13px; background: #8db7ff; color: #101218; font: inherit; font-weight: 600; cursor: pointer; }}
-      .edit-recipe {{ display: block; margin: 0 0 10px auto; padding: 0; background: transparent; color: #8db7ff; font-weight: 400; text-decoration: underline; }}
+      .edit-recipe {{ display: block; margin: 0 0 10px; margin-inline-end: auto; padding: 0; background: transparent; color: #8db7ff; font-weight: 400; text-decoration: underline; }}
       .edit-recipe:hover {{ color: #a8c8ff; }}
       .edit-recipe:focus-visible {{ outline: 2px solid #8db7ff; outline-offset: 3px; }}
       dialog {{ width: min(520px, calc(100% - 32px)); border: 1px solid #3a414f; border-radius: 12px; padding: 0; background: #171a21; color: #eceef3; }}
@@ -326,22 +359,22 @@ def render_html(
       .recipe-form input {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .type-combobox {{ position: relative; }}
       .type-combobox ul {{ position: absolute; inset-inline: 0; top: 100%; z-index: 5; box-sizing: border-box; margin: 4px 0 0; padding: 4px; list-style: none; max-height: 220px; overflow-y: auto; border: 1px solid #3a414f; border-radius: 8px; background: #171a21; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }}
-      .type-combobox li {{ padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: right; }}
+      .type-combobox li {{ padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: start; }}
       .type-combobox li:hover, .type-combobox li[aria-selected="true"] {{ background: #252b38; }}
       .type-combobox li.new {{ color: #8db7ff; }}
       .recipe-form select {{ box-sizing: border-box; width: 100%; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .recipe-form textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #101218; color: #eceef3; font: inherit; }}
       .ingredients-editor {{ display: grid; gap: 8px; }}
       .ingredients-editor > span {{ color: #cbd1dc; }}
-      .ingredients-editor-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; direction: rtl; }}
-      .ingredients-editor-table th, .ingredients-editor-table td {{ padding: 5px; border: 1px solid #3a414f; text-align: right; }}
+      .ingredients-editor-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+      .ingredients-editor-table th, .ingredients-editor-table td {{ padding: 5px; border: 1px solid #3a414f; text-align: start; }}
       .ingredients-editor-table th {{ color: #cbd1dc; font-weight: 600; }}
       .ingredients-editor-table th:last-child, .ingredients-editor-table td:last-child {{ width: 42px; }}
       .ingredients-editor-table input {{ min-width: 0; padding: 8px; }}
       .remove-ingredient {{ padding: 7px 9px; background: #7d2c32; color: #fff; }}
       .add-ingredient {{ justify-self: start; background: #2a2f3a; color: #eceef3; }}
       .form-actions {{ display: flex; justify-content: flex-end; gap: 8px; }}
-      .danger-actions {{ display: flex; gap: 8px; margin-right: auto; }}
+      .danger-actions {{ display: flex; gap: 8px; margin-inline-end: auto; }}
       .secondary-button {{ background: #2a2f3a; color: #eceef3; }}
       .danger-button {{ background: #7d2c32; color: #fff; }}
       .save-status {{ min-height: 1.25em; margin: 0; color: #92d3a2; font-size: .9rem; }}
@@ -367,67 +400,68 @@ def render_html(
     </style>
   </head>
   <body>
-    <a class="shopping-list-link" href="shopping_list.html" dir="rtl" aria-label="פתיחת רשימת הקניות">רשימת הקניות</a>
+    <a class="shopping-list-link" href="shopping_list.html" aria-label="{t.html('shopping_list_open')}">{t.html('shopping_list')}</a>
     <main>
       <div class="page-header">
-        <h1>ספר המתכונים שלי</h1>
+        <h1>{t.html('app_title')}</h1>
         <div class="header-actions">
-          <button id="add-recipe" type="button">הוסף מתכון</button>
+          <button id="add-recipe" type="button">{t.html('add_recipe')}</button>
           <div id="import-controls">
-            <button id="import-post" type="button" disabled aria-label="Import next post from the end">ייבוא הפוסט הבא מהסוף</button>
+            <button id="import-post" type="button" disabled aria-label="{t.html('import_next_post')}">{t.html('import_next_post')}</button>
           </div>
         </div>
       </div>
       <div class="import-feedback">
         <p id="import-status" role="status" aria-live="polite"></p>
-        <a id="import-refresh" href="index.html" hidden>Refresh cookbook</a>
+        <a id="import-refresh" href="index.html" hidden>{t.html('import_refresh')}</a>
       </div>
-      <a class="back-to-cookbook" href="index.html">חזרה לכל המתכונים</a>
-      <div class="recipe-search" id="recipe-search" role="search" aria-label="חיפוש מתכונים">
-        <label>סוג <select id="search-type"><option value="">הכל</option></select></label>
-        <label>מקור <select id="search-source"><option value="">הכל</option><option value="lizapanelim">ליזה פאנלים</option><option value="unknown">לא ידוע</option></select></label>
+      <a class="back-to-cookbook" href="index.html">{t.html('back_to_all_recipes')}</a>
+      <div class="recipe-search" id="recipe-search" role="search" aria-label="{t.html('search_recipes')}">
+        <label>{t.html('filter_type')} <select id="search-type"><option value="">{t.html('filter_all')}</option></select></label>
+        <label>{t.html('filter_source')} <select id="search-source"><option value="">{t.html('filter_all')}</option><option value="lizapanelim">{t.html('source_lizapanelim')}</option><option value="unknown">{t.html('source_unknown')}</option></select></label>
       </div>
       <section class=\"grid\" id=\"recipe-grid\"></section>
-      <p class="no-filter-results" id="no-filter-results" hidden>אין מתכונים התואמים לסינון.</p>
+      <p class="no-filter-results" id="no-filter-results" hidden>{t.html('no_filter_results')}</p>
     </main>
     <dialog id="recipe-dialog">
       <form class="recipe-form" id="recipe-form">
-        <h2 id="recipe-form-title">Add recipe</h2>
+        <h2 id="recipe-form-title">{t.html('add_recipe_title')}</h2>
         <input id="recipe-id" type="hidden" />
-        <label>Recipe name <input id="recipe-title" type="text" maxlength="160" required /></label>
+        <label>{t.html('recipe_name')} <input id="recipe-title" type="text" maxlength="160" dir="auto" required /></label>
         <div class="type-field">
-          <label for="recipe-type">סוג מתכון</label>
+          <label for="recipe-type">{t.html('recipe_type')}</label>
           <div class="type-combobox">
-            <input id="recipe-type" type="text" role="combobox" aria-expanded="false" aria-controls="recipe-type-list" aria-autocomplete="list" autocomplete="off" maxlength="60" dir="rtl" placeholder="בחרו סוג או הקלידו סוג חדש ולחצו Enter" />
-            <ul id="recipe-type-list" role="listbox" aria-label="סוגי מתכונים" hidden></ul>
+            <input id="recipe-type" type="text" role="combobox" aria-expanded="false" aria-controls="recipe-type-list" aria-autocomplete="list" autocomplete="off" maxlength="60" dir="auto" placeholder="{t.html('recipe_type_placeholder')}" />
+            <ul id="recipe-type-list" role="listbox" aria-label="{t.html('recipe_types')}" hidden></ul>
           </div>
         </div>
-        <label>Recipe link <input id="recipe-url" type="url" placeholder="https://..." /></label>
-        <label>Source link <input id="source-url" type="url" placeholder="https://..." /></label>
-        <label>Image link <input id="image-url" type="text" placeholder="https://..." /></label>
+        <label>{t.html('recipe_link')} <input id="recipe-url" type="url" dir="ltr" placeholder="https://..." /></label>
+        <label>{t.html('source_link')} <input id="source-url" type="url" dir="ltr" placeholder="https://..." /></label>
+        <label>{t.html('image_link')} <input id="image-url" type="text" dir="ltr" placeholder="https://..." /></label>
         <div class="ingredients-editor">
-          <span>מצרכים</span>
+          <span>{t.html('ingredients')}</span>
           <table class="ingredients-editor-table">
-            <thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th><th scope="col"><span class="visually-hidden">פעולות</span></th></tr></thead>
+            <thead><tr><th scope="col">{t.html('ingredient_name')}</th><th scope="col">{t.html('ingredient_varieties')}</th><th scope="col">{t.html('ingredient_amount')}</th><th scope="col"><span class="visually-hidden">{t.html('ingredient_actions')}</span></th></tr></thead>
             <tbody id="ingredients-editor-body"></tbody>
           </table>
-          <button class="add-ingredient" id="add-ingredient" type="button">הוספת מצרך</button>
+          <button class="add-ingredient" id="add-ingredient" type="button">{t.html('add_ingredient')}</button>
         </div>
-        <label>הוראות הכנה <textarea id="recipe-instructions" maxlength="10000" dir="rtl" placeholder="הקלידו כאן את הוראות ההכנה..."></textarea></label>
+        <label>{t.html('instructions')} <textarea id="recipe-instructions" maxlength="10000" dir="auto" placeholder="{t.html('instructions_placeholder')}"></textarea></label>
         <p class="save-status" id="save-status" aria-live="polite"></p>
         <div class="form-actions">
           <div class="danger-actions">
-            <button class="danger-button" id="not-recipe" type="button">Not a recipe</button>
-            <button class="danger-button" id="delete-recipe" type="button">Delete</button>
+            <button class="danger-button" id="not-recipe" type="button">{t.html('not_recipe')}</button>
+            <button class="danger-button" id="delete-recipe" type="button">{t.html('delete')}</button>
           </div>
-          <button class="secondary-button" id="cancel-recipe" type="button">Cancel</button>
-          <button type="submit">Save</button>
+          <button class="secondary-button" id="cancel-recipe" type="button">{t.html('cancel')}</button>
+          <button type="submit">{t.html('save')}</button>
         </div>
       </form>
     </dialog>
     <script>
       (async () => {{
         const storageKey = "cookbook-recipe-changes-v1";
+        {_FORMAT_SCRIPT}
         const scrollStorageKey = "cookbook-main-scroll-position";
         const baseRecipes = {base_recipes_json};
         const grid = document.getElementById("recipe-grid");
@@ -443,10 +477,10 @@ def render_html(
         const instructionsInput = document.getElementById("recipe-instructions");
         const typeInput = document.getElementById("recipe-type");
         const typeList = document.getElementById("recipe-type-list");
-        const unknownType = "לא ידוע";
+        const unknownType = {json.dumps(_UNKNOWN_TYPE, ensure_ascii=False)};
         let typeNames = [];
         const recipeType = (recipe) => (recipe.type || "").trim() || unknownType;
-        const knownTypes = (extra) => [...new Set([unknownType, extra, ...typeNames, ...[...grid.querySelectorAll("[data-recipe-id]")].map((card) => recipeType(recipeFromCard(card)))].filter(Boolean))].sort((a, b) => a.localeCompare(b, "he"));
+        const knownTypes = (extra) => [...new Set([unknownType, extra, ...typeNames, ...[...grid.querySelectorAll("[data-recipe-id]")].map((card) => recipeType(recipeFromCard(card)))].filter(Boolean))].sort((a, b) => a.localeCompare(b, {t.lang_js}));
         let typeItems = [];
         let typeActive = -1;
         let typeFiltering = false;
@@ -463,7 +497,7 @@ def render_html(
           typeList.replaceChildren(...typeItems.map((item, index) => {{
             const option = document.createElement("li");
             option.role = "option"; option.dataset.index = index;
-            option.textContent = item.create ? `הוספת "${{item.name}}"` : item.name;
+            option.textContent = item.create ? fmt({t.js('type_add')}, {{ name: item.name }}) : item.name;
             option.classList.toggle("new", item.create);
             option.setAttribute("aria-selected", String(index === typeActive));
             return option;
@@ -526,7 +560,7 @@ def render_html(
         if (!state || typeof state !== "object") state = {{ overrides: {{}}, custom: [] }};
         state.overrides ||= {{}};
         state.custom ||= [];
-        {_RECIPE_STATE_SCRIPT}
+        {t.fill(_RECIPE_STATE_SCRIPT)}
         if (hosted) {{
           try {{
             const response = await fetch("/api/recipe-types", {{ cache: "no-store" }});
@@ -594,11 +628,11 @@ def render_html(
           const row = document.createElement("tr");
           ["name", "varieties", "amount"].forEach((field) => {{
             const cell = document.createElement("td");
-            const input = document.createElement("input"); input.type = "text"; input.maxLength = 120; input.dataset.field = field; input.value = ingredient[field] || "";
+            const input = document.createElement("input"); input.type = "text"; input.dir = "auto"; input.maxLength = 120; input.dataset.field = field; input.value = ingredient[field] || "";
             cell.append(input); row.append(cell);
           }});
           const actionCell = document.createElement("td");
-          const remove = document.createElement("button"); remove.type = "button"; remove.className = "remove-ingredient"; remove.textContent = "−"; remove.setAttribute("aria-label", "מחיקת מצרך");
+          const remove = document.createElement("button"); remove.type = "button"; remove.className = "remove-ingredient"; remove.textContent = "−"; remove.setAttribute("aria-label", {t.js('remove_ingredient')});
           remove.addEventListener("click", () => {{ row.remove(); if (!ingredientsEditorBody.rows.length) addIngredientRow(); }});
           actionCell.append(remove); row.append(actionCell); ingredientsEditorBody.append(row);
         }};
@@ -607,7 +641,7 @@ def render_html(
           const detailUrl = `index.html?recipe=${{encodeURIComponent(recipe.id)}}`;
           card.querySelector(".recipe-detail-link").href = detailUrl;
           const source = card.querySelector(".source-link");
-          const newSource = linkRow(safeLink(recipe.sourceUrl), "אינסטגרם", "source-link") || document.createElement("p");
+          const newSource = linkRow(safeLink(recipe.sourceUrl), {t.js('instagram')}, "source-link") || document.createElement("p");
           newSource.className ||= "link-row source-link"; newSource.hidden = !recipe.sourceUrl;
           source.replaceWith(newSource);
           newSource.previousElementSibling.hidden = newSource.hidden;
@@ -636,7 +670,7 @@ def render_html(
           ingredientsBody.replaceChildren(...displayedIngredients.map((ingredient) => {{
             const row = document.createElement("tr");
             [ingredient.name, ingredient.varieties, ingredient.amount].forEach((value) => {{
-              const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+              const cell = document.createElement("td"); cell.dir = "auto"; cell.textContent = value; row.append(cell);
             }});
             return row;
           }}));
@@ -645,7 +679,7 @@ def render_html(
           instructionsBox.hidden = !instructions;
           instructionsBox.querySelector("pre").textContent = instructions;
           const prerequisiteSelect = card.querySelector(".recipe-prerequisite select");
-          prerequisiteSelect.replaceChildren(new Option("לא נדרש מתכון נוסף", ""));
+          prerequisiteSelect.replaceChildren(new Option({t.js('no_prerequisite')}, ""));
           grid.querySelectorAll("[data-recipe-id]").forEach((candidateCard) => {{
             const candidate = recipeFromCard(candidateCard);
             if (candidate.id !== recipe.id) prerequisiteSelect.add(new Option(candidate.title, candidate.id));
@@ -662,13 +696,13 @@ def render_html(
           const imageUrl = safeLink(recipe.imageUrl);
           if (imageUrl) {{
             const image = document.createElement("img"); image.src = imageUrl; image.alt = recipe.title; image.loading = "lazy";
-            const imageLink = document.createElement("a"); imageLink.href = detailUrl; imageLink.setAttribute("aria-label", `פרטי המתכון: ${{recipe.title}}`); imageLink.append(image); imageBox.append(imageLink);
+            const imageLink = document.createElement("a"); imageLink.href = detailUrl; imageLink.setAttribute("aria-label", fmt({t.js('recipe_details')}, {{ title: recipe.title }})); imageLink.append(image); imageBox.append(imageLink);
           }}
           card.dataset.recipe = JSON.stringify(recipe);
         }};
         const createCard = (recipe) => {{
           const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id; card.id = `recipe-${{encodeURIComponent(recipe.id)}}`;
-          card.innerHTML = '<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2><div class="card-meta" aria-label="קישורים למתכון"><span class="meta-label">מקור</span><p class="link-row source-link"></p><span class="meta-label">מתכונים</span><div class="recipe-links"></div></div></header><div class="recipe-prerequisite"><span>דרוש הכנה של</span><select aria-label="דרוש הכנה של"></select><a class="prerequisite-link">למתכון</a><span class="prerequisite-status" aria-live="polite"></span></div><section class="recipe-ingredients"><h3>מצרכים</h3><table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th></tr></thead><tbody></tbody></table></section><section class="recipe-instructions"><h3>הוראות הכנה</h3><pre></pre></section><section class="recipe-notes"><h3>הערות</h3><textarea aria-label="הערות למתכון"></textarea><p class="recipe-notes-status" aria-live="polite"></p></section><button class="edit-recipe" type="button">עריכת המתכון</button><div class="card-image"></div>';
+          card.innerHTML = '{card_template}';
           updateCard(card, recipe); return card;
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
@@ -679,7 +713,7 @@ def render_html(
           const ingredients = normalizeIngredients(recipe.ingredients);
           (ingredients.length ? ingredients : [{{}}]).forEach(addIngredientRow);
           instructionsInput.value = recipe.instructions || "";
-          formTitle.textContent = recipe.id ? "עריכת המתכון" : "הוספת מתכון"; deleteButton.hidden = !isCustom;
+          formTitle.textContent = recipe.id ? {t.js('edit_recipe')} : {t.js('add_recipe_title')}; deleteButton.hidden = !isCustom;
           notRecipeButton.hidden = isCustom || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
           if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
@@ -690,7 +724,7 @@ def render_html(
         const refreshTypeOptions = () => {{
           const types = knownTypes("");
           const selected = searchType.value;
-          searchType.replaceChildren(new Option("הכל", ""), ...types.map((type) => new Option(type, type)));
+          searchType.replaceChildren(new Option({t.js('filter_all')}, ""), ...types.map((type) => new Option(type, type)));
           searchType.value = types.includes(selected) ? selected : "";
         }};
         const applySourceFilter = () => {{
@@ -721,7 +755,7 @@ def render_html(
             openEditor(recipeFromCard(selectedCard), !baseIds.has(selectedRecipeId), true);
           }}
         }}
-        if (!grid.children.length) grid.innerHTML = "<p>No recipes found.</p>";
+        if (!grid.children.length) grid.innerHTML = "<p>{t.html('no_recipes')}</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
         if (savedScrollPosition !== null) {{
           sessionStorage.removeItem(scrollStorageKey);
@@ -807,12 +841,12 @@ def render_html(
         notRecipeButton.addEventListener("click", async () => {{
           const id = idInput.value; if (!id || !baseIds.has(id)) return;
           notRecipeButton.disabled = true;
-          saveStatus.textContent = "מסמן כלא מתכון…";
+          saveStatus.textContent = {t.js('marking_not_recipe')};
           try {{
             const response = await fetch(`/api/recipes/${{encodeURIComponent(id)}}/not-recipe`, {{ method: "POST" }});
             if (!response.ok) throw new Error();
           }} catch {{
-            saveStatus.textContent = "לא ניתן לסמן את הפוסט. נסו שוב.";
+            saveStatus.textContent = {t.js('mark_failed')};
             notRecipeButton.disabled = false;
             return;
           }}
@@ -824,15 +858,16 @@ def render_html(
         }});
       }})();
     </script>
-    <script>{_IMPORT_POST_SCRIPT}</script>
+    <script>{t.fill(_IMPORT_POST_SCRIPT)}</script>
   </body>
 </html>
 """
 
 
-def render_notes_html(recipes: list[Recipe], favicon_href: str) -> str:
+def render_notes_html(recipes: list[Recipe], favicon_href: str, locale: str = DEFAULT_LOCALE) -> str:
     """Render recipe notes on their own page, sharing cookbook database state."""
 
+    t = Translator(locale)
     base_recipes = [
         {
             "id": recipe.id,
@@ -847,11 +882,11 @@ def render_notes_html(recipes: list[Recipe], favicon_href: str) -> str:
     recipes_json = json.dumps(base_recipes, ensure_ascii=False).replace("</", "<\\/")
     safe_favicon_href = html.escape(favicon_href, quote=True)
     return f"""<!doctype html>
-<html lang="en">
+<html lang="{t.lang}" dir="{t.direction}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Recipe notes</title>
+    <title>{t.html('recipe_notes')}</title>
     <link rel="icon" type="image/svg+xml" href="{safe_favicon_href}" />
     <style>
       body {{ margin: 0; background: #0f1115; color: #eceef3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
@@ -868,14 +903,15 @@ def render_notes_html(recipes: list[Recipe], favicon_href: str) -> str:
   </head>
   <body>
     <main>
-      <a href="index.html">Back to cookbook</a>
-      <h1 id="page-title">Recipe notes</h1>
-      <p class="intro" id="intro">Notes are saved automatically.</p>
+      <a href="index.html">{t.html('back_to_cookbook')}</a>
+      <h1 id="page-title">{t.html('recipe_notes')}</h1>
+      <p class="intro" id="intro">{t.html('notes_intro')}</p>
       <section class="notes-grid" id="notes-grid"></section>
     </main>
     <script>
       (async () => {{
         const storageKey = "cookbook-recipe-changes-v1";
+        {_FORMAT_SCRIPT}
         const baseRecipes = {recipes_json};
         let state;
         try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
@@ -883,23 +919,23 @@ def render_notes_html(recipes: list[Recipe], favicon_href: str) -> str:
         if (!state || typeof state !== "object") state = {{ overrides: {{}}, custom: [] }};
         state.overrides ||= {{}};
         state.custom ||= [];
-        {_RECIPE_STATE_SCRIPT}
+        {t.fill(_RECIPE_STATE_SCRIPT)}
         const recipes = baseRecipes.map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}) }})).concat(state.custom);
         const grid = document.getElementById("notes-grid");
         const recipeId = new URLSearchParams(window.location.search).get("id");
         const recipe = recipes.find((candidate) => candidate.id === recipeId);
         if (!recipe) {{
-          document.getElementById("page-title").textContent = "Recipe not found";
-          document.getElementById("intro").textContent = "Open notes from a recipe card in the cookbook.";
+          document.getElementById("page-title").textContent = {t.js('recipe_not_found')};
+          document.getElementById("intro").textContent = {t.js('open_notes_hint')};
           return;
         }}
-        document.title = `${{recipe.title || "Recipe"}} notes`;
-        document.getElementById("page-title").textContent = recipe.title || "Untitled recipe";
+        document.title = fmt({t.js('notes_document_title')}, {{ title: recipe.title || {t.js('recipe_fallback')} }});
+        document.getElementById("page-title").textContent = recipe.title || {t.js('untitled_recipe')};
         {{
           const card = document.createElement("article"); card.className = "note-card";
-          const title = document.createElement("h2"); title.textContent = "Notes";
-          const input = document.createElement("textarea"); input.dir = "rtl"; input.maxLength = 2000;
-          input.placeholder = "הוסיפו טיפים להכנה, תחליפים או הערות נוספות..."; input.value = recipe.notes || "";
+          const title = document.createElement("h2"); title.textContent = {t.js('notes')};
+          const input = document.createElement("textarea"); input.dir = "auto"; input.maxLength = 2000;
+          input.placeholder = {t.js('notes_placeholder')}; input.value = recipe.notes || "";
           const status = document.createElement("p"); status.className = "status"; status.setAttribute("aria-live", "polite");
           input.addEventListener("input", () => {{
             recipe.notes = input.value;
@@ -917,16 +953,18 @@ def render_notes_html(recipes: list[Recipe], favicon_href: str) -> str:
 """
 
 
-def render_shopping_list_html(favicon_href: str) -> str:
+def render_shopping_list_html(favicon_href: str, locale: str = DEFAULT_LOCALE) -> str:
     """Render the standalone shopping-list page using the report's shared storage."""
 
+    t = Translator(locale)
     safe_favicon_href = html.escape(favicon_href, quote=True)
+    empty_count = html.escape(t.text("items_count_other").replace("{count}", "0"))
     return f"""<!doctype html>
-<html lang="en">
+<html lang="{t.lang}" dir="{t.direction}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Shopping list</title>
+    <title>{t.html('shopping_list')}</title>
     <link rel="icon" type="image/svg+xml" href="{safe_favicon_href}" />
     <style>
       body {{ margin: 0; background: #0f1115; color: #eceef3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
@@ -947,28 +985,28 @@ def render_shopping_list_html(favicon_href: str) -> str:
       .list-footer {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; }}
       .export-actions {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }}
       .export-button:disabled {{ cursor: not-allowed; opacity: 0.5; }}
-      .export-status {{ min-height: 1.4em; margin: 8px 0 0; color: #5f564c; direction: rtl; text-align: right; }}
+      .export-status {{ min-height: 1.4em; margin: 8px 0 0; color: #5f564c; }}
       @media (max-width: 480px) {{ .shopping-form {{ flex-wrap: wrap; }} .shopping-form button {{ flex: 1; }} }}
     </style>
   </head>
   <body>
     <main>
-      <a class="back-link" href="index.html">Back to cookbook</a>
+      <a class="back-link" href="index.html">{t.html('back_to_cookbook')}</a>
       <section class="shopping-list" aria-labelledby="shopping-list-title">
-        <h1 id="shopping-list-title">Shopping list</h1>
-        <p>Add items, check them off, and keep the list in this browser.</p>
+        <h1 id="shopping-list-title">{t.html('shopping_list')}</h1>
+        <p>{t.html('shopping_intro')}</p>
         <form class="shopping-form" id="shopping-form">
-          <input id="shopping-item-input" type="text" maxlength="120" placeholder="Add an item..." aria-label="Shopping list item" required />
-          <button type="submit">Add item</button>
+          <input id="shopping-item-input" type="text" maxlength="120" placeholder="{t.html('shopping_placeholder')}" aria-label="{t.html('shopping_item')}" required />
+          <button type="submit">{t.html('add_item')}</button>
         </form>
         <div class="shopping-items" id="shopping-items"></div>
-        <p class="empty-shopping-list" id="empty-shopping-list">Your list is empty.</p>
+        <p class="empty-shopping-list" id="empty-shopping-list">{t.html('list_empty')}</p>
         <div class="list-footer">
-          <span id="shopping-count">0 items</span>
-          <button class="clear-purchased" id="clear-purchased" type="button">Clear purchased</button>
+          <span id="shopping-count">{empty_count}</span>
+          <button class="clear-purchased" id="clear-purchased" type="button">{t.html('clear_purchased')}</button>
         </div>
-        <div class="export-actions" aria-label="Export shopping list">
-          <button class="export-button" id="send-to-trello" type="button" dir="rtl"><span>ייצוא ל־</span><bdi>Trello</bdi></button>
+        <div class="export-actions" aria-label="{t.html('export_shopping_list')}">
+          <button class="export-button" id="send-to-trello" type="button"><span>{t.html('export_to')}</span><bdi>Trello</bdi></button>
         </div>
         <p class="export-status" id="export-status" role="status" aria-live="polite"></p>
       </section>
@@ -976,6 +1014,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
     <script>
       (async () => {{
         const storageKey = "cookbook-shopping-list";
+        {_FORMAT_SCRIPT}
         const form = document.getElementById("shopping-form");
         const input = document.getElementById("shopping-item-input");
         const itemsElement = document.getElementById("shopping-items");
@@ -1007,26 +1046,26 @@ def render_shopping_list_html(favicon_href: str) -> str:
           try {{ localStorage.setItem(hosted ? backupKey : storageKey, JSON.stringify(snapshot)); }}
           catch {{ backupSaved = false; }}
           if (!hosted) {{
-            exportStatus.textContent = backupSaved ? "Saved." : "Browser save failed. Keep this page open and copy your list.";
+            exportStatus.textContent = backupSaved ? {t.js('saved')} : {t.js('shopping_browser_save_failed')};
             return;
           }}
-          exportStatus.textContent = "Saving…";
+          exportStatus.textContent = {t.js('saving')};
           pendingSave = pendingSave.then(async () => {{
             try {{
-              if (blocked) throw new Error("Reload before saving again; your browser backup is retained.");
+              if (blocked) throw new Error({t.js('shopping_reload_blocked')});
               const response = await fetch("/api/shopping-list", {{
                 method: "PUT", headers: {{ "Content-Type": "application/json" }},
                 body: JSON.stringify({{ items: snapshot, revision }}),
               }});
               if (!response.ok) throw new Error(response.status === 409
-                ? "Shopping list changed in another tab. Reload before saving; your browser backup is retained."
-                : "Database save failed. Reload to retry; your browser backup is retained.");
+                ? {t.js('shopping_conflict')}
+                : {t.js('shopping_save_failed')});
               revision = (await response.json()).revision;
-              exportStatus.textContent = "Saved.";
+              exportStatus.textContent = {t.js('saved')};
             }} catch (error) {{
               blocked = true;
               exportStatus.textContent = backupSaved ? error.message
-                : "Save failed and browser backup is unavailable. Keep this page open and copy your list.";
+                : {t.js('shopping_save_unrecoverable')};
             }}
           }});
         }};
@@ -1041,33 +1080,35 @@ def render_shopping_list_html(favicon_href: str) -> str:
             revision = persisted.revision;
             document.querySelectorAll("button, input").forEach((control) => control.disabled = false);
           }} catch {{
-            exportStatus.textContent = "Unable to load shopping list. Reload to retry; browser data is retained.";
+            exportStatus.textContent = {t.js('shopping_load_failed')};
             document.querySelectorAll("button, input").forEach((control) => control.disabled = true);
             return;
           }}
         }}
         const render = () => {{
           itemsElement.replaceChildren();
-          [...items].sort((a, b) => a.name.localeCompare(b.name, "he")).forEach((item) => {{
+          [...items].sort((a, b) => a.name.localeCompare(b.name, {t.lang_js})).forEach((item) => {{
             const row = document.createElement("div");
             row.className = `shopping-item${{item.done ? " done" : ""}}`;
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
             checkbox.checked = item.done;
-            checkbox.setAttribute("aria-label", `Mark ${{item.name}} as purchased`);
+            checkbox.setAttribute("aria-label", fmt({t.js('mark_purchased')}, {{ name: item.name }}));
             checkbox.addEventListener("change", () => {{ item.done = checkbox.checked; save(); render(); }});
             const label = document.createElement("label");
-            label.textContent = item.name;
+            const name = document.createElement("bdi");
+            name.textContent = item.name;
+            label.append(name);
             const removeButton = document.createElement("button");
             removeButton.className = "remove-item";
             removeButton.type = "button";
-            removeButton.textContent = "Remove";
+            removeButton.textContent = {t.js('remove')};
             removeButton.addEventListener("click", () => {{ items = items.filter((candidate) => candidate.id !== item.id); save(); render(); }});
             row.append(checkbox, label, removeButton);
             itemsElement.append(row);
           }});
           emptyElement.hidden = items.length > 0;
-          countElement.textContent = `${{items.length}} item${{items.length === 1 ? "" : "s"}}`;
+          countElement.textContent = items.length === 1 ? {t.js('items_count_one')} : fmt({t.js('items_count_other')}, {{ count: items.length }});
           trelloButton.disabled = items.length === 0;
         }};
         form.addEventListener("submit", async (event) => {{
@@ -1083,7 +1124,7 @@ def render_shopping_list_html(favicon_href: str) -> str:
         clearButton.addEventListener("click", () => {{ items = items.filter((item) => !item.done); save(); render(); }});
         trelloButton.addEventListener("click", async () => {{
           trelloButton.disabled = true;
-          setBidiStatus("מייצא את רשימת הקניות ל־", "Trello", "…");
+          setBidiStatus({t.js('exporting_to')}, "Trello", "…");
           try {{
             const response = await fetch("/api/trello/cards", {{
               method: "POST",
@@ -1091,19 +1132,19 @@ def render_shopping_list_html(favicon_href: str) -> str:
               body: JSON.stringify(items),
             }});
             const result = await response.json();
-            if (!response.ok) throw new Error(result.error || "Trello export failed");
+            if (!response.ok) throw new Error(result.error || {t.js('export_failed')});
             const statusText = result.action === "updated"
-              ? "הכרטיס הקיים עודכן בבורד "
-              : "כרטיס חדש נוצר בבורד ";
+              ? {t.js('export_updated')}
+              : {t.js('export_created')};
             setBidiStatus(statusText, "My To Do List", ". ");
             const cardLink = document.createElement("a");
             cardLink.href = result.url;
             cardLink.target = "_blank";
             cardLink.rel = "noopener noreferrer";
-            cardLink.textContent = "פתיחת הכרטיס";
+            cardLink.textContent = {t.js('open_card')};
             exportStatus.append(cardLink);
           }} catch (error) {{
-            setBidiStatus("לא ניתן היה לייצא את הרשימה ל־", "Trello", ".");
+            setBidiStatus({t.js('export_failed_to')}, "Trello", ".");
           }} finally {{
             trelloButton.disabled = items.length === 0;
           }}
