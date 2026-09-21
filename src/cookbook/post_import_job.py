@@ -51,7 +51,7 @@ def main() -> None:
     try:
         imported = import_next_post(root, create_session_factory())
     except IncompleteProfileError as error:
-        print(f"{REASON_PREFIX}{error}", file=sys.stderr)
+        print(f"{REASON_PREFIX}{error.code}", file=sys.stderr)
         raise SystemExit(4) from None
     raise SystemExit(0 if imported else 3)
 

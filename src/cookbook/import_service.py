@@ -9,6 +9,8 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from .import_reasons import REASONS
+
 # The job prints one line with this prefix when the scan is incomplete. Its text is
 # a fixed message from our own code, so it is safe to show; other output is not.
 REASON_PREFIX = "IMPORT-REASON: "
@@ -38,12 +40,19 @@ def run_scraper(root: Path) -> tuple[int, str]:
         return process.returncode, errors or ""
 
 
-def _reason(errors: str) -> str:
-    """The job's own explanation of an incomplete scan, if it gave one."""
+def _reason_code(errors: str) -> str:
+    """The job's own explanation of an incomplete scan, if it gave a known one."""
     for line in reversed(errors.splitlines()):
         if line.startswith(REASON_PREFIX):
-            return line.removeprefix(REASON_PREFIX).strip()
+            code = line.removeprefix(REASON_PREFIX).strip()
+            return code if code in REASONS else ""
     return ""
+
+
+def _status(status: str, code: str, message: str, reason_code: str = "") -> dict[str, str]:
+    """A status for the page: ``code`` and ``reason_code`` let it show a translation,
+    ``message`` is the English text for other API clients."""
+    return {"status": status, "code": code, "message": message, "reason_code": reason_code}
 
 
 class ImportService:
@@ -53,7 +62,7 @@ class ImportService:
         self.root = root
         self.refresh = refresh
         self._lock = threading.Lock()
-        self._status = {"status": "idle", "message": ""}
+        self._status = _status("idle", "", "")
 
     def status(self) -> dict[str, str]:
         with self._lock:
@@ -63,7 +72,10 @@ class ImportService:
         with self._lock:
             if self._status["status"] == "running":
                 return False
-            self._status = {"status": "running", "message": "Finding the oldest post not yet imported. This may take several minutes."}
+            self._status = _status(
+                "running", "running",
+                "Finding the oldest post not yet imported. This may take several minutes.",
+            )
             threading.Thread(target=self._run, daemon=True).start()
             return True
 
@@ -75,18 +87,27 @@ class ImportService:
                 print(f"Import job exited with code {code}:\n{errors[-_LOG_TAIL:]}", file=sys.stderr, flush=True)
             if code == 0:
                 self.refresh()
-                status = {"status": "succeeded", "message": "Post imported. Refresh the cookbook to view it."}
+                status = _status("succeeded", "succeeded", "Post imported. Refresh the cookbook to view it.")
             elif code == 4:
-                reason = _reason(errors)
-                detail = f" Reason: {reason}" if reason else ""
-                status = {"status": "failed", "message": f"Could not finish scanning for the oldest post. No post was imported.{detail} Please try again later."}
+                reason_code = _reason_code(errors)
+                detail = f" Reason: {REASONS[reason_code]}" if reason_code else ""
+                status = _status(
+                    "failed", "incomplete",
+                    f"Could not finish scanning for the oldest post. No post was imported.{detail} Please try again later.",
+                    reason_code,
+                )
             elif code == 3:
-                status = {"status": "empty", "message": "No unseen posts were found at the end of the loaded feed."}
+                status = _status("empty", "empty", "No unseen posts were found at the end of the loaded feed.")
             else:
-                status = {"status": "failed", "message": "Import failed. Check Instagram credentials and session access, then try again."}
+                status = _status(
+                    "failed", "failed",
+                    "Import failed. Check Instagram credentials and session access, then try again.",
+                )
         except subprocess.TimeoutExpired:
-            status = {"status": "failed", "message": "Import timed out. Please try again later."}
+            status = _status("failed", "timeout", "Import timed out. Please try again later.")
         except Exception:  # noqa: BLE001 - the worker thread must always record a final status.
-            status = {"status": "failed", "message": "Unable to finish the import. Refresh the cookbook before retrying."}
+            status = _status(
+                "failed", "error", "Unable to finish the import. Refresh the cookbook before retrying."
+            )
         with self._lock:
             self._status = status

@@ -6,6 +6,7 @@ import re
 import pytest
 
 from cookbook.i18n import DEFAULT_LOCALE, LOCALES, Translator
+from cookbook.import_reasons import REASONS
 from cookbook.models import Post, Recipe
 from cookbook.site_pages import (
     render_html,
@@ -123,3 +124,14 @@ def test_user_content_uses_automatic_direction() -> None:
     assert 'input.dir = "auto"' in pages["notes"]
     for field in ("recipe-url", "source-url", "image-url"):
         assert re.search(rf'id="{field}" type="(?:url|text)" dir="ltr"', cookbook), field
+
+
+def test_every_import_status_and_reason_the_server_can_send_is_translated() -> None:
+    """The server sends codes; a code without a string would show a raw English fallback."""
+    for code, locale in LOCALES.items():
+        for status in ("running", "succeeded", "empty", "failed", "timeout", "error", "incomplete"):
+            assert f"import_{status}" in locale.strings, (code, status)
+        for reason in REASONS:
+            assert f"import_reason_{reason}" in locale.strings, (code, reason)
+    hebrew = LOCALES["he"].strings
+    assert not re.search("[A-Za-z]{4,}", hebrew["import_running"] + hebrew["import_reason_scroll_limit"])

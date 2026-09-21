@@ -137,12 +137,35 @@ _IMPORT_POST_SCRIPT = r"""
           return;
         }
         let timer;
+        const messages = {
+          running: @@import_running@@,
+          succeeded: @@import_succeeded@@,
+          empty: @@import_empty@@,
+          failed: @@import_failed@@,
+          timeout: @@import_timeout@@,
+          error: @@import_error@@,
+        };
+        const reasons = {
+          pagination_incomplete: @@import_reason_pagination_incomplete@@,
+          pagination_unconfirmed: @@import_reason_pagination_unconfirmed@@,
+          scroll_limit: @@import_reason_scroll_limit@@,
+          feed_end_not_found: @@import_reason_feed_end_not_found@@,
+        };
+        const describe = (result) => {
+          if (result.code === "incomplete") {
+            const reason = reasons[result.reason_code];
+            return reason
+              ? @@import_incomplete_reason@@.replace("{reason}", reason)
+              : @@import_incomplete@@;
+          }
+          return messages[result.code] ?? result.message;
+        };
         const show = (result) => {
           if (!["idle", "running", "succeeded", "empty", "failed"].includes(result.status)) throw new Error();
           clearTimeout(timer);
           button.disabled = result.status === "running";
           button.setAttribute("aria-busy", String(button.disabled));
-          status.textContent = result.message;
+          status.textContent = describe(result);
           refresh.hidden = result.status !== "succeeded";
           if (button.disabled) timer = setTimeout(check, 2000);
         };

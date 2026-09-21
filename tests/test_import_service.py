@@ -80,7 +80,7 @@ def test_timeout_is_reported_without_private_details(tmp_path, monkeypatch):
     monkeypatch.setattr(import_service, 'run_scraper', run)
     service = import_service.ImportService(tmp_path, lambda: None)
     service._run()
-    assert service.status()['status'] == 'failed'
+    assert service.status()['status'] == 'failed' and service.status()['code'] == 'timeout'
     assert 'timed out' in service.status()['message']
     assert 'private details' not in service.status()['message']
 
@@ -141,17 +141,36 @@ def test_failed_import_logs_the_scraper_output_and_shows_only_the_safe_reason(tm
     """Regression: a failed import gave no clue why, because the scraper's output was discarded."""
     errors = (
         "Traceback ... password=hunter2 ...\n"
-        f"{import_service.REASON_PREFIX}Instagram did not confirm the profile pagination end; no post selected.\n"
+        f"{import_service.REASON_PREFIX}pagination_unconfirmed\n"
     )
     monkeypatch.setattr(import_service, 'run_scraper', lambda root: (4, errors))
     service = import_service.ImportService(tmp_path, lambda: None)
     service._run()
 
-    message = service.status()['message']
-    assert 'Instagram did not confirm the profile pagination end' in message
-    assert 'hunter2' not in message and 'Traceback' not in message
+    status = service.status()
+    assert 'Instagram did not confirm the profile pagination end' in status['message']
+    assert (status['code'], status['reason_code']) == ('incomplete', 'pagination_unconfirmed')
+    assert 'hunter2' not in str(status) and 'Traceback' not in str(status)
     logged = capsys.readouterr().err
-    assert 'exited with code 4' in logged and 'Instagram did not confirm' in logged
+    assert 'exited with code 4' in logged and 'pagination_unconfirmed' in logged
+
+
+def test_unknown_reason_from_the_job_is_not_passed_to_the_page(tmp_path, monkeypatch):
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (4, f"{import_service.REASON_PREFIX}password=hunter2\n"))
+    service = import_service.ImportService(tmp_path, lambda: None)
+    service._run()
+    assert service.status()['reason_code'] == '' and 'hunter2' not in str(service.status())
+
+
+def test_every_status_carries_a_code_the_page_can_localize(tmp_path, monkeypatch):
+    def run(code, errors=''):
+        monkeypatch.setattr(import_service, 'run_scraper', lambda root: (code, errors))
+        service = import_service.ImportService(tmp_path, lambda: None)
+        service._run()
+        return service.status()['code']
+    assert [run(0), run(3), run(1), run(4)] == ['succeeded', 'empty', 'failed', 'incomplete']
+    assert import_service.ImportService(tmp_path, lambda: None).status()['code'] == ''
+
 
 
 def test_failed_import_without_a_reason_keeps_the_generic_message(tmp_path, monkeypatch, capsys):
@@ -165,7 +184,7 @@ def test_failed_import_without_a_reason_keeps_the_generic_message(tmp_path, monk
 
 def test_job_reports_why_the_scan_was_incomplete(tmp_path, monkeypatch, capsys):
     def incomplete(root, factory):
-        raise post_import_job.IncompleteProfileError('Profile pagination data was incomplete; no post selected.')
+        raise post_import_job.IncompleteProfileError('pagination_incomplete')
     monkeypatch.setattr(post_import_job, 'import_next_post', incomplete)
     monkeypatch.setattr(post_import_job, 'create_session_factory', lambda: None)
     monkeypatch.setattr(post_import_job, 'load_dotenv', lambda *args: None)
@@ -175,7 +194,7 @@ def test_job_reports_why_the_scan_was_incomplete(tmp_path, monkeypatch, capsys):
         post_import_job.main()
 
     assert exit_info.value.code == 4
-    assert f"{import_service.REASON_PREFIX}Profile pagination data was incomplete" in capsys.readouterr().err
+    assert f"{import_service.REASON_PREFIX}pagination_incomplete" in capsys.readouterr().err
 
 
 def test_run_scraper_returns_the_job_stderr(tmp_path, monkeypatch):

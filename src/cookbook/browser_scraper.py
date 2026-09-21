@@ -11,12 +11,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from .import_reasons import REASONS
 from .models import Post, Recipe
 from .profile_timeline import ProfileTimeline
 
 
 class IncompleteProfileError(RuntimeError):
     """The profile could not be scrolled to its end within the safety limit."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(REASONS[code])
+        self.code = code
 
 
 def _normalize_instagram_image_url(image_url: str) -> str:
@@ -272,7 +277,7 @@ def _scroll_profile_timeline(page: Any, timeline: ProfileTimeline) -> list[str]:
     idle = 0
     for _ in range(4000):
         if timeline.invalid:
-            raise IncompleteProfileError("Profile pagination data was incomplete; no post selected.")
+            raise IncompleteProfileError("pagination_incomplete")
         if timeline.complete:
             return timeline.paths()
         previous_count = len(timeline.posts)
@@ -290,8 +295,8 @@ def _scroll_profile_timeline(page: Any, timeline: ProfileTimeline) -> list[str]:
             if len(timeline.posts) > previous_count:
                 idle = 0
         if idle >= 30 and not timeline.complete:
-            raise IncompleteProfileError("Instagram did not confirm the profile pagination end; no post selected.")
-    raise IncompleteProfileError("Profile scrolling reached its safety limit; no post selected.")
+            raise IncompleteProfileError("pagination_unconfirmed")
+    raise IncompleteProfileError("scroll_limit")
 
 
 def _scroll_profile_until_complete(
@@ -366,7 +371,7 @@ def _scroll_profile_until_complete(
                 idle_scrolls = 0
                 slow_recheck_done = False
 
-    raise IncompleteProfileError("Profile scrolling reached its safety limit before finding the feed end; no post selected.")
+    raise IncompleteProfileError("feed_end_not_found")
 
 
 def _shortcode_from_media_path(media_path: str) -> str:
