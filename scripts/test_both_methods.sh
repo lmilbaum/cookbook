@@ -10,7 +10,7 @@ echo
 
 # Get the directory of this script
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$DIR"
+cd "$DIR/.."
 
 # Test 1: API-based scraper
 echo "Test 1: API-Based Scraper (Instaloader)"

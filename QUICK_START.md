@@ -9,7 +9,7 @@ make up
 
 Open http://localhost:8765/. Compose starts PostgreSQL,
 applies schema migrations, and serves database-backed cookbook pages.
-`make down` stops the services and retains the database (stored in the local `.postgres-data/` folder). `make backup` saves a timestamped dump to `.private-backups/`.
+`make down` stops the services and retains the database (stored in the local `.postgres-data/` folder). `make restart` runs `make down` then `make up`, rebuilding the image. `make backup` saves a timestamped dump to `.private-backups/`.
 
 ## Import existing data
 
@@ -21,6 +21,7 @@ in `.env` for host commands, matching the Compose database settings.
 uv run cookbook-import-post-store --store lizapanelim_posts_items
 # Optional separate legacy titles:
 uv run cookbook-import-post-store --store lizapanelim_posts_items --titles lizapanelim_posts_titles.json
+uv run cookbook-import-recipe-photos --directory lizapanelim_posts_assets
 uv run cookbook-import-shopping-list --file shopping_list.json
 uv run cookbook-import-recipe-state --file recipe-state.json
 ```
@@ -41,11 +42,12 @@ Configure `cookbook.toml` and local Instagram credentials in `.env`.
 
 ```sh
 uv run playwright install chromium
-uv run cookbook --config cookbook.toml --no-open
+uv run cookbook --config cookbook.toml
 ```
 
 Set `use_browser = true` to use Playwright directly. Otherwise the importer tries
-the API and falls back to the browser on unauthorized responses. See
+the API and falls back to the browser on unauthorized responses. New recipes and
+their photos are saved to the database only; no JSON or HTML files are written. See
 [BROWSER_SCRAPER.md](BROWSER_SCRAPER.md) for scraper setup. View new posts through
 the hosted cookbook to use shared database edits; opening exported HTML through
 `file://` uses browser-only edits.

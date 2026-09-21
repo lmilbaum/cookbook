@@ -179,7 +179,6 @@ _IMPORT_POST_SCRIPT = r"""
 
 def render_html(
     recipes: list[Recipe],
-    username: str,
     favicon_href: str,
     titles: dict[str, str] | None = None,
     locale: str = DEFAULT_LOCALE,

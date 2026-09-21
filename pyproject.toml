@@ -21,6 +21,7 @@ cookbook-import-shopping-list = "cookbook.shopping_list_import:main"
 cookbook-import-recipe-state = "cookbook.recipe_state_import:main"
 cookbook-import-recipe-page = "cookbook.recipe_page_import:main"
 cookbook-import-recipe-image = "cookbook.recipe_image_import:main"
+cookbook-import-recipe-photos = "cookbook.recipe_photo_import:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -14,9 +14,9 @@ from .browser_scraper import IncompleteProfileError, fetch_posts_browser
 from .config import load_config, resolve_from
 from .database import create_session_factory
 from .import_service import REASON_PREFIX
-from .main import _cache_images_for_report
 from .models import Post
 from .post_repository import insert_missing_recipes
+from .recipe_photo_fetch import store_missing_photos
 
 
 def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
@@ -37,8 +37,9 @@ def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
     ][:1]
     if not recipes:
         return 0
-    _cache_images_for_report(recipes, root / "lizapanelim_posts.json")
-    return insert_missing_recipes(factory, recipes)
+    imported = insert_missing_recipes(factory, recipes)
+    store_missing_photos(factory, recipes)
+    return imported
 
 
 def main() -> None:

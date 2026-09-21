@@ -118,3 +118,16 @@ class RecipeImage(Base):
     filename: Mapped[str] = mapped_column(Text, primary_key=True)
     content_type: Mapped[str] = mapped_column(Text)
     data: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class RecipePhoto(Base):
+    """The cached photo shown on a recipe card, keyed by recipe id.
+
+    Not a foreign key: like posts, a photo may outlive its recipe.
+    """
+
+    __tablename__ = "recipe_photos"
+
+    recipe_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    content_type: Mapped[str] = mapped_column(Text)
+    data: Mapped[bytes] = mapped_column(LargeBinary)

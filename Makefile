@@ -1,4 +1,4 @@
-.PHONY: up down backup
+.PHONY: up down restart backup
 
 # Number of timestamped backups to keep in .private-backups/.
 KEEP ?= 30
@@ -8,6 +8,11 @@ up:
 
 down:
 	docker compose down
+
+# Stop and rebuild/start the stack. Database data is retained in .postgres-data/.
+restart:
+	$(MAKE) down
+	$(MAKE) up
 
 # Dump the database to a timestamped file. Written to a temporary name first so
 # a failed dump never leaves a truncated backup behind.

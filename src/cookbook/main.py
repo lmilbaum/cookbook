@@ -1,15 +1,12 @@
-"""Fetch Instagram profile posts and export them to JSON and HTML."""
+"""Fetch Instagram profile posts and store them in the database."""
 
 from __future__ import annotations
 
 import json
 import os
-import webbrowser
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 
 from .api_method import InstagramUnauthorizedError, fetch_posts_api
 from .browser_scraper import fetch_posts_browser
@@ -18,96 +15,7 @@ from .database import create_session_factory
 from .dependencies import load_dotenv_loader
 from .models import Recipe
 from .post_repository import insert_missing_recipes, load_recipes
-from .site_pages import (
-    render_html,
-    render_notes_html,
-    render_shopping_list_html,
-    write_favicon,
-)
-
-
-def _find_cached_asset(assets_dir: Path, shortcode: str) -> Path | None:
-    """Return an existing cached asset path for a shortcode when present."""
-
-    for suffix in (".jpg", ".jpeg", ".png", ".webp"):
-        candidate = assets_dir / f"{shortcode}{suffix}"
-        if candidate.exists():
-            return candidate
-    return None
-
-
-# pylint: disable=too-many-locals
-def _cache_images_for_report(
-    recipes: list[Recipe],
-    output_path: Path,
-    reuse_cached_assets: bool = True,
-) -> list[Recipe]:
-    """Download image URLs to local files for robust HTML rendering."""
-
-    assets_dir = output_path.with_name(f"{output_path.stem}_assets")
-    assets_dir.mkdir(parents=True, exist_ok=True)
-
-    cached_recipes: list[Recipe] = []
-    for recipe in recipes:
-        image_url = recipe.image_url.strip()
-        if not image_url.startswith("http"):
-            cached_recipes.append(recipe)
-            continue
-
-        existing_cached_asset = _find_cached_asset(assets_dir, recipe.id)
-        if reuse_cached_assets and existing_cached_asset is not None:
-            local_ref = existing_cached_asset.relative_to(output_path.parent).as_posix()
-            cached_recipes.append(replace(recipe, image_url=local_ref))
-            continue
-
-        split = urlsplit(image_url)
-        suffix = Path(split.path).suffix.lower()
-        if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
-            suffix = ".jpg"
-
-        target_path = assets_dir / f"{recipe.id}{suffix}"
-        candidate_urls = [image_url]
-        if recipe.post is not None:
-            candidate_urls += [
-                f"https://www.instagram.com/p/{recipe.post.shortcode}/media/?size=l",
-                f"https://www.instagram.com/p/{recipe.post.shortcode}/media/?size=m",
-            ]
-
-        content: bytes | None = None
-        for candidate_url in candidate_urls:
-            try:
-                request = Request(
-                    candidate_url,
-                    headers={
-                        "User-Agent": (
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/120.0.0.0 Safari/537.36"
-                        ),
-                        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                    },
-                )
-                with urlopen(request, timeout=20) as response:
-                    content = response.read()
-                if content:
-                    break
-            except OSError:
-                continue
-
-        if content is None:
-            fallback_asset = _find_cached_asset(assets_dir, recipe.id)
-            if fallback_asset is not None:
-                local_ref = fallback_asset.relative_to(output_path.parent).as_posix()
-                cached_recipes.append(replace(recipe, image_url=local_ref))
-            else:
-                cached_recipes.append(replace(recipe, image_url=""))
-            continue
-
-        target_path.write_bytes(content)
-        local_ref = target_path.relative_to(output_path.parent).as_posix()
-        cached_recipes.append(replace(recipe, image_url=local_ref))
-
-    return cached_recipes
+from .recipe_photo_fetch import store_missing_photos
 
 
 def _cooldown_marker_path(session_file: str) -> Path:
@@ -234,7 +142,6 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
     base_dir = config_path.parent.resolve()
     env_path = resolve_from(base_dir, config.env_file)
     session_path = resolve_from(base_dir, config.session_file)
-    output_path = resolve_from(base_dir, config.output)
     load_dotenv = load_dotenv_loader()
     load_dotenv(env_path)
 
@@ -273,54 +180,17 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
         if should_fetch
         else []
     )
-    if not config.ignore_cached_posts:
-        insert_missing_recipes(session_factory, new_recipes)
-        merged_recipes = load_recipes(session_factory, reverse=config.reverse)
-    else:
-        merged_recipes = new_recipes
-    report_recipes = _cache_images_for_report(
-        merged_recipes,
-        output_path,
-        reuse_cached_assets=not config.ignore_cached_posts,
-    )
-
-    payload = [asdict(recipe) for recipe in report_recipes]
-    with open(output_path, "w", encoding="utf-8") as file:
-        json.dump(payload, file, ensure_ascii=False, indent=2)
-
-    favicon_path = write_favicon(output_path)
-    html_path = output_path.with_name("index.html")
-    html_path.write_text(
-        render_html(
-            report_recipes,
-            config.username,
-            favicon_href=favicon_path.name,
-        ),
-        encoding="utf-8",
-    )
-    shopping_list_path = html_path.with_name("shopping_list.html")
-    shopping_list_path.write_text(
-        render_shopping_list_html(favicon_href=favicon_path.name),
-        encoding="utf-8",
-    )
-    notes_path = html_path.with_name("notes.html")
-    notes_path.write_text(
-        render_notes_html(report_recipes, favicon_href=favicon_path.name),
-        encoding="utf-8",
-    )
-    if not args.no_open:
-        was_opened = webbrowser.open(html_path.resolve().as_uri())
-        if not was_opened:
-            raise RuntimeError(f"Failed to open HTML report: {html_path}")
-
-    print(f"Fetched {len(new_recipes)} new posts for @{config.username} -> {output_path}")
-    print(f"Total posts in output: {len(merged_recipes)}")
-    action = "Updated HTML report" if args.no_open else "Updated and opened HTML report"
-    print(f"{action} -> {html_path}")
     if config.ignore_cached_posts:
+        print(f"Fetched {len(new_recipes)} posts for @{config.username}")
         print("Skipped database writes (strict window mode)")
-    else:
-        print("Post source of truth: PostgreSQL")
+        return
+
+    inserted = insert_missing_recipes(session_factory, new_recipes)
+    photos = store_missing_photos(session_factory, new_recipes)
+    total = len(load_recipes(session_factory, reverse=config.reverse))
+    print(f"Fetched {len(new_recipes)} new posts for @{config.username}; stored {inserted} recipes and {photos} photos")
+    print(f"Total recipes in the database: {total}")
+    print("Post source of truth: PostgreSQL. Run the server to view the cookbook.")
 
 
 if __name__ == "__main__":

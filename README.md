@@ -70,9 +70,13 @@ second. Recipe order follows `reverse` in the served directory’s `cookbook.tom
 `true` displays oldest first and `false` displays newest first (also the default
 when no configuration file exists). Reload mode also picks up ordering changes.
 Without `--reload`, restart the server to regenerate pages. An empty
-database produces an empty cookbook. Generated pages prefer existing images in
-`lizapanelim_posts_assets` over external image URLs stored in the database. Legacy post JSON files are never read or
-modified by the server; import them before switching to database-backed pages. Existing `.env` settings remain available to the
+database produces an empty cookbook. Recipe card photos are stored in the
+database (`recipe_photos`) and served from `/recipes/photos/<recipe id>`; cards
+prefer them over the expiring Instagram image URLs. The old
+`/<name>_posts_assets/<id>.jpg` URLs saved inside recipe edits keep working and
+are answered from the same table. Legacy post JSON files and cached image files
+are never read or modified by the server; import them before switching to
+database-backed pages. Existing `.env` settings remain available to the
 server. This is a local development setup; the web server serves this directory.
 
 Compose defaults to database `cookbook`, user `cookbook`, password
@@ -109,8 +113,20 @@ uv run alembic -c pyproject.toml upgrade head
 After that, import the existing durable per-post JSON store once. The command
 is idempotent: it adds missing shortcodes and never overwrites existing rows.
 After this one-time import, normal `cookbook` runs use PostgreSQL as the post
-source of truth. They still generate JSON and HTML report files for the static
-web UI, but those files are not read back as post data.
+source of truth. They store new recipes and their photos in the database and no
+longer write JSON or HTML report files; the server renders the pages. The
+`output` key in `cookbook.toml` is no longer used and is ignored if present. With
+`ignore_cached_posts = true` the command only fetches and reports; it writes
+nothing.
+
+Photos cached in an earlier `*_posts_assets/` directory are imported once, keeping
+the files:
+
+```sh
+uv run cookbook-import-recipe-photos --directory lizapanelim_posts_assets
+```
+
+The command adds missing photos and never replaces existing ones.
 
 The schema also includes `ingredients` (one row per ingredient) and
 `shopping_list_items` (one row per item, referencing an ingredient, with optional
@@ -144,8 +160,7 @@ uv run cookbook-import-post-store --store lizapanelim_posts_items --titles lizap
 
 Titles are applied to new posts and fill blank titles on existing posts; existing
 nonblank database titles and recipe overrides remain authoritative. The source
-files are retained. Normal imports no longer use legacy file-storage helpers,
-and report generation retains cached images even in strict window mode.
+files are retained. Normal imports no longer use legacy file-storage helpers.
 
 
 Recipe edits, custom recipes, ingredients entered in recipes, preparation links,
@@ -198,11 +213,13 @@ docker compose exec postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
-Inspect logs and stop the environment:
+Inspect logs, stop the environment, or restart it (stop, then rebuild and start;
+the database is retained):
 
 ```sh
 docker compose logs postgres
 make down
+make restart
 ```
 
 The database files live in the local `.postgres-data/` folder (git-ignored),

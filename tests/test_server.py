@@ -230,21 +230,16 @@ def test_reports_use_database_posts_and_preserve_legacy_json(tmp_path) -> None:
     )
     item.post = Post(shortcode="database-recipe", url="https://example.com/recipe", typename="GraphImage", is_video=False)
     item.image_url = "https://expired.example/recipe.jpg"
-    assets = tmp_path / "lizapanelim_posts_assets"
-    assets.mkdir()
-    cached_image = assets / f"{item.id}.jpg"
-    cached_image.write_bytes(b"cached image")
     insert_missing_recipes(factory, [item])
-    server._render_reports(report, load_recipes(factory, reverse=False), assets)
+    server._render_reports(report, load_recipes(factory, reverse=False), {item.id})
     assert "Database recipe title" in report.read_text()
-    assert "lizapanelim_posts_assets/database-recipe.jpg" in report.read_text()
+    assert "recipes/photos/database-recipe" in report.read_text()
     assert "expired.example" not in report.read_text()
     assert load_recipes(factory, reverse=False)[0].image_url == item.image_url
-    assert cached_image.read_bytes() == b"cached image"
     assert (tmp_path / "notes.html").exists()
     assert (tmp_path / "shopping_list.html").exists()
     mark_not_recipe(factory, item.post.shortcode)
-    server._render_reports(report, load_recipes(factory, reverse=False), assets)
+    server._render_reports(report, load_recipes(factory, reverse=False), {item.id})
     assert "Database recipe title" not in report.read_text()
     assert legacy.read_text() == "invalid legacy JSON must not be read"
     engine.dispose()
@@ -271,10 +266,11 @@ def test_reload_retries_database_failure_and_only_renders_changes(tmp_path, monk
             raise KeyboardInterrupt
 
     monkeypatch.setattr(server, "load_recipes", load)
-    monkeypatch.setattr(server, "_render_reports", lambda path, posts, assets_dir: rendered.append(posts))
+    monkeypatch.setattr(server, "photo_ids", lambda factory: set())
+    monkeypatch.setattr(server, "_render_reports", lambda path, posts, photos: rendered.append(posts))
     monkeypatch.setattr(server.time, "sleep", sleep)
     with pytest.raises(KeyboardInterrupt):
-        server._watch_and_render(tmp_path / "report.html", None, tmp_path / "assets")
+        server._watch_and_render(tmp_path / "report.html", None)
     assert rendered == [[], ["changed"]]
     assert "secret" not in capsys.readouterr().out
 
@@ -325,6 +321,7 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
     backups = tmp_path / '.private-backups'
     backups.mkdir()
     (backups / 'backup.dump').write_bytes(b'private fixture')
+    # Legacy cached photos on disk are no longer served: photos come from the database.
     assets = tmp_path / 'lizapanelim_posts_assets'
     assets.mkdir()
     (assets / 'test.jpg').write_bytes(b'image fixture')
@@ -339,9 +336,8 @@ def test_static_serving_blocks_local_data_and_backups(tmp_path):
     try:
         with urlopen(base + '/') as response:
             assert response.read() == b'Cookbook'
-        with urlopen(base + '/lizapanelim_posts_assets/test.jpg') as response:
-            assert response.read() == b'image fixture'
         for path in ['/.env', '/.private-backups/backup.dump', '/lizapanelim_posts_assets/',
+                     '/lizapanelim_posts_assets/test.jpg',
                      '/lizapanelim_posts_assets/secret.jpg', '/%2eenv',
                      '/recipes/apple_cake.html', '/recipes/nested/apple_cake.html',
                      '/recipes/assets/apple-cake.jpg']:
@@ -487,3 +483,43 @@ def test_no_warning_when_the_database_cannot_be_read() -> None:
     from sqlalchemy.orm import sessionmaker
 
     assert server.empty_database_warning(sessionmaker(bind=create_engine("sqlite://"))) is None
+
+
+def test_recipe_photo_served_from_database_including_legacy_saved_urls(tmp_path) -> None:
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.error import HTTPError
+    from urllib.request import urlopen
+
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from cookbook.database import Base
+    from cookbook.recipe_photo_repository import insert_recipe_photo
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    insert_recipe_photo(factory, "BCP_gsMu-WY", "image/jpeg", b"photo bytes")
+    http = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(tmp_path, factory))
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{http.server_port}'
+    try:
+        # Saved recipe edits hold the old cache URL, so it must keep resolving.
+        for path in ['/recipes/photos/BCP_gsMu-WY', '/lizapanelim_posts_assets/BCP_gsMu-WY.jpg']:
+            with urlopen(base + path) as response:
+                assert response.read() == b"photo bytes"
+                assert response.headers["Content-Type"] == "image/jpeg"
+        for path in ['/recipes/photos/missing', '/lizapanelim_posts_assets/missing.jpg',
+                     '/recipes/photos/nested/BCP_gsMu-WY']:
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + path)
+            assert error.value.code == 404
+    finally:
+        http.shutdown()
+        http.server_close()
+        thread.join()
+        engine.dispose()

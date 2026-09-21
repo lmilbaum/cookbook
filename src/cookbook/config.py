@@ -14,7 +14,6 @@ class AppConfig:  # pylint: disable=too-many-instance-attributes
 
     username: str
     limit: int
-    output: str
     reverse: bool
     login_user: str
     session_file: str
@@ -35,11 +34,6 @@ def parse_args() -> argparse.Namespace:
         description="Fetch Instagram posts using a TOML config file."
     )
     parser.add_argument("--config", default="cookbook.toml", help="Path to TOML config file")
-    parser.add_argument(
-        "--no-open",
-        action="store_true",
-        help="Generate the report without opening a new browser tab.",
-    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -69,10 +63,6 @@ def load_config(config_path: Path) -> AppConfig:  # pylint: disable=too-many-bra
     limit = raw.get("limit", 0)
     if not isinstance(limit, int):
         raise TypeError("Config key 'limit' must be an integer.")
-
-    output = raw.get("output", "instagram_posts.json")
-    if not isinstance(output, str) or not output.strip():
-        raise ValueError("Config key 'output' must be a non-empty string.")
 
     reverse = raw.get("reverse", False)
     if not isinstance(reverse, bool):
@@ -125,7 +115,6 @@ def load_config(config_path: Path) -> AppConfig:  # pylint: disable=too-many-bra
     return AppConfig(
         username=username.strip(),
         limit=limit,
-        output=output.strip(),
         reverse=reverse,
         login_user=login_user.strip(),
         session_file=session_file.strip(),

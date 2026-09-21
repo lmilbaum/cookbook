@@ -16,7 +16,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, BinaryIO, ClassVar
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlencode, urlsplit
+from urllib.parse import quote, unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
@@ -31,6 +31,7 @@ from .models import Recipe, RecipeState
 from .post_repository import load_recipes, mark_not_recipe
 from .recipe_image_repository import load_recipe_image
 from .recipe_page_repository import load_recipe_page
+from .recipe_photo_repository import load_recipe_photo, photo_ids
 from .recipe_state_repository import (
     RecipeStateConflict,
     load_recipe_state,
@@ -52,32 +53,27 @@ from .type_repository import (
 )
 
 _HOME_PAGE_NAME = "index.html"
-_LEGACY_POSTS_BASENAME = "lizapanelim_posts"
+_PHOTO_URL = "recipes/photos/{}"
 
 
-def _render_reports(report_path: Path, recipes: list[Recipe], assets_dir: Path) -> None:
-    """Rebuild static pages from a database snapshot, leaving JSON exports alone."""
+def _render_reports(report_path: Path, recipes: list[Recipe], photos: set[str]) -> None:
+    """Rebuild static pages from a database snapshot.
+
+    ``photos`` holds the ids of recipes with a stored photo; their cards point at
+    the photo route instead of the (expiring) Instagram image URL.
+    """
 
     from . import site_pages  # Imported here so development reloads can refresh it.
 
     site_pages = importlib.reload(site_pages)
-    cached_assets = {
-        asset.stem: asset
-        for asset in sorted(assets_dir.glob("*"), reverse=True)
-        if asset.is_file() and asset.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
-    }
     recipes = [
-        replace(recipe, image_url=cached_assets[recipe.id].relative_to(report_path.parent).as_posix())
-        if recipe.id in cached_assets else recipe
+        replace(recipe, image_url=_PHOTO_URL.format(quote(recipe.id, safe="")))
+        if recipe.id in photos else recipe
         for recipe in recipes
     ]
     favicon_path = site_pages.write_favicon(report_path)
     report_path.write_text(
-        site_pages.render_html(
-            recipes,
-            _LEGACY_POSTS_BASENAME.removesuffix("_posts"),
-            favicon_path.name,
-        ),
+        site_pages.render_html(recipes, favicon_path.name),
         encoding="utf-8",
     )
     report_path.with_name("shopping_list.html").write_text(
@@ -97,28 +93,20 @@ def _load_report_recipes(root: Path, factory: sessionmaker[Session]) -> list[Rec
     return load_recipes(factory, reverse=reverse)
 
 
-def _report_assets_dir(root: Path) -> Path:
-    """Locate the cached-image directory tied to the scraper's JSON output."""
-
-    config_path = root / "cookbook.toml"
-    if config_path.exists():
-        output_stem = Path(load_config(config_path).output).stem
-        return root / f"{output_stem}_assets"
-    return root / f"{_LEGACY_POSTS_BASENAME}_assets"
-
-
-def _watch_and_render(
-    report_path: Path, factory: sessionmaker[Session], assets_dir: Path
-) -> None:
-    """Poll database posts and renderer code, rebuilding only when they change."""
+def _watch_and_render(report_path: Path, factory: sessionmaker[Session]) -> None:
+    """Poll database posts, photos and renderer code, rebuilding only when they change."""
 
     renderer_path = Path(__file__).with_name("site_pages.py")
-    previous: tuple[int, list[Recipe]] | None = None
+    previous: tuple[int, list[Recipe], set[str]] | None = None
     while True:
         try:
-            current = (renderer_path.stat().st_mtime_ns, _load_report_recipes(report_path.parent, factory))
+            current = (
+                renderer_path.stat().st_mtime_ns,
+                _load_report_recipes(report_path.parent, factory),
+                photo_ids(factory),
+            )
             if current != previous:
-                _render_reports(report_path, current[1], assets_dir)
+                _render_reports(report_path, current[1], current[2])
                 previous = current
                 print("Reload mode: updated report pages. Refresh the browser to view changes.")
         except SQLAlchemyError:
@@ -270,6 +258,9 @@ def _create_trello_card(items: list[dict[str, Any]]) -> dict[str, str]:
 
 _RECIPE_PAGE_PATH = re.compile(r"^/recipes/([^/]+)\.html$")
 _RECIPE_IMAGE_PATH = re.compile(r"^/recipes/assets/([^/]+)$")
+_RECIPE_PHOTO_PATH = re.compile(r"^/recipes/photos/([^/]+)$")
+# Saved recipe edits still point at the old cached files, e.g. /lizapanelim_posts_assets/<id>.jpg.
+_LEGACY_PHOTO_PATH = re.compile(r"^/[^/]+_posts_assets/([^/]+)\.(?:jpg|jpeg|png|webp)$")
 _NOT_RECIPE_PATH = re.compile(r"^/api/recipes/([^/]+)/not-recipe$")
 _TYPES_PATH = re.compile(r"^/api/recipe-types(?:/(\d+))?$")
 
@@ -280,7 +271,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
     imports = ImportService(
         root,
         lambda: _render_reports(
-            root / _HOME_PAGE_NAME, _load_report_recipes(root, factory), _report_assets_dir(root)
+            root / _HOME_PAGE_NAME, _load_report_recipes(root, factory), photo_ids(factory)
         ),
     )
 
@@ -301,10 +292,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                 relative = candidate.relative_to(root.resolve())
                 allowed = relative.as_posix() in {
                     _HOME_PAGE_NAME, "shopping_list.html", "notes.html", "favicon.svg",
-                } or (
-                    candidate.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
-                    and relative.parts[0].endswith("_posts_assets")
-                )
+                }
             if not allowed or not candidate.is_file():
                 self.send_error(404, "Not found")
                 return None
@@ -374,9 +362,14 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                 return
             request_path = unquote(urlsplit(self.path).path)
             recipe_image_match = _RECIPE_IMAGE_PATH.fullmatch(request_path)
-            if recipe_image_match:
+            recipe_photo_match = _RECIPE_PHOTO_PATH.fullmatch(request_path) or _LEGACY_PHOTO_PATH.fullmatch(request_path)
+            if recipe_image_match or recipe_photo_match:
                 try:
-                    image = load_recipe_image(factory, recipe_image_match.group(1))
+                    image = (
+                        load_recipe_image(factory, recipe_image_match.group(1))
+                        if recipe_image_match
+                        else load_recipe_photo(factory, recipe_photo_match.group(1))
+                    )
                 except SQLAlchemyError:
                     self.send_error(503, "Unable to read recipe image")
                     return
@@ -559,7 +552,7 @@ def empty_database_warning(factory: sessionmaker[Session]) -> str | None:
         "WARNING: the database has no recipes and no saved recipe edits. If this is "
         "unexpected (for example the database folder or Docker storage was deleted), "
         "restore the newest dump in .private-backups/ with pg_restore, or re-import "
-        "posts with: uv run cookbook-import-post-store --store lizapanelim_posts_items. "
+        "posts with: uv run cookbook-import-post-store --store <posts_items directory>. "
         "Create backups regularly with: make backup"
     )
 
@@ -584,12 +577,11 @@ def main() -> None:
     if warning := empty_database_warning(factory):
         print(warning, file=sys.stderr)
     report_path = root / _HOME_PAGE_NAME
-    assets_dir = _report_assets_dir(root)
-    _render_reports(report_path, _load_report_recipes(report_path.parent, factory), assets_dir)
+    _render_reports(report_path, _load_report_recipes(report_path.parent, factory), photo_ids(factory))
     if args.reload:
         threading.Thread(
             target=_watch_and_render,
-            args=(report_path, factory, assets_dir),
+            args=(report_path, factory),
             daemon=True,
         ).start()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(root, factory))

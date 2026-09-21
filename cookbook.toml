@@ -1,7 +1,6 @@
 # cspell:words lizapanelim
 username = "lizapanelim"
 limit = 9
-output = "lizapanelim_posts.json"
 reverse = true
 login_user = "lmilbaum"
 session_file = ".instagram.session"

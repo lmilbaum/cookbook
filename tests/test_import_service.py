@@ -36,7 +36,7 @@ def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, mo
         calls.append(kwargs)
         return [recipe('next')]
     monkeypatch.setattr(post_import_job, 'fetch_posts_browser', fetch)
-    monkeypatch.setattr(post_import_job, '_cache_images_for_report', lambda recipes, path: cached.append(recipes))
+    monkeypatch.setattr(post_import_job, 'store_missing_photos', lambda factory, recipes: cached.append(recipes))
     monkeypatch.setattr(post_import_job, 'load_dotenv', lambda *args: None)
     assert post_import_job.import_next_post(tmp_path, factory) == 1
     assert calls[0]['seen_shortcodes'] == {'hidden', 'known'}

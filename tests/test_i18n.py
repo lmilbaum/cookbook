@@ -7,7 +7,11 @@ import pytest
 
 from cookbook.i18n import DEFAULT_LOCALE, LOCALES, Translator
 from cookbook.models import Post, Recipe
-from cookbook.site_pages import render_html, render_notes_html, render_shopping_list_html
+from cookbook.site_pages import (
+    render_html,
+    render_notes_html,
+    render_shopping_list_html,
+)
 
 
 def _recipe() -> Recipe:
@@ -21,7 +25,7 @@ def _recipe() -> Recipe:
 
 def _pages(locale: str) -> dict[str, str]:
     return {
-        "cookbook": render_html([_recipe()], "user", "favicon.svg", locale=locale),
+        "cookbook": render_html([_recipe()], "favicon.svg", locale=locale),
         "notes": render_notes_html([_recipe()], "favicon.svg", locale=locale),
         "shopping": render_shopping_list_html("favicon.svg", locale=locale),
     }
@@ -87,7 +91,7 @@ def test_unsupported_locale_is_rejected() -> None:
 
 def test_translator_escapes_for_the_context_it_is_used_in() -> None:
     translator = Translator("en")
-    translator._strings = {"x": 'a "b" <c> </script>'}  # noqa: SLF001
+    translator._strings = {"x": 'a "b" <c> </script>'}
     assert translator.html("x") == "a &quot;b&quot; &lt;c&gt; &lt;/script&gt;"
     assert translator.js("x") == '"a \\"b\\" <c> <\\/script>"'
     assert translator.fill("show(@@x@@)") == 'show("a \\"b\\" <c> <\\/script>")'

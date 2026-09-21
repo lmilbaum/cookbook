@@ -54,7 +54,6 @@ def test_configured_browser_scraper_is_used_without_calling_the_api(monkeypatch)
     config = AppConfig(
         username="example",
         limit=1,
-        output="posts.json",
         reverse=False,
         login_user="user",
         session_file="session",

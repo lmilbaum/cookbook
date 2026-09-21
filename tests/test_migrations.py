@@ -32,6 +32,7 @@ _FROZEN = {
     "20260919_01_types.py": "f1df0d743efbcc22439ff5eb8c492989861d415361086a7468deca676b031b62",
     "20260919_02_rename_tables_to_match_models.py": "00169e9c5e816ef729de735d43807d437d4570e6fb19d740eb080f2e754d8135",
     "20260919_03_rename_source_other_to_unknown.py": "2da047ffa54b2040ea80e884cc82828994b4c4715319fe9a3c857eac5761e945",
+    "20260921_01_recipe_photos.py": "f5cf3cdb7028769b6d8b2b138d3686de40dcf55f126885bed7de95fe994c3a96",
 }
 
 
