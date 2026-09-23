@@ -287,13 +287,10 @@ def render_html(
       .import-feedback p {{ margin: 0 0 6px; }}
       button:disabled {{ opacity: .6; cursor: wait; }}
       .page-header h1 {{ margin: 0; }}
-      .back-to-cookbook {{ display: none; margin-bottom: 14px; }}
-      .recipe-view .back-to-cookbook {{ display: block; }}
       .no-filter-results {{ color: #929baa; }}
       .recipe-search {{ display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 0 16px; padding: 12px; border: 1px solid #303644; border-radius: 9px; background: #12151b; }}
       .recipe-search label {{ display: flex; flex-direction: column; gap: 4px; flex: 1 1 160px; }}
       .recipe-search select {{ padding: 9px 10px; font: inherit; color: inherit; border: 1px solid #303644; border-radius: 8px; background: #0f1115; }}
-      .recipe-view .recipe-search {{ display: none; }}
       .link-row {{
         margin: 0 0 10px;
       }}
@@ -321,21 +318,20 @@ def render_html(
       .card-meta a {{ text-underline-offset: 3px; }}
       .card-title a {{ color: inherit; text-decoration: none; }}
       .card-title a:hover {{ color: #a8c8ff; }}
-      .cookbook-view .card-meta,
-      .cookbook-view .recipe-prerequisite,
-      .cookbook-view .recipe-ingredients,
-      .cookbook-view .recipe-instructions,
-      .cookbook-view .recipe-notes,
-      .cookbook-view .edit-recipe {{ display: none; }}
-      .cookbook-view .card-header {{ margin-bottom: 12px; }}
-      .cookbook-view .card-image img {{ margin: 0; }}
-      .recipe-view .card-image {{ display: flex; justify-content: flex-start; }}
-      .recipe-view .card-image a {{ width: min(220px, 100%); }}
-      .recipe-view .card-image img {{ max-height: 220px; margin: 0; }}
-      .recipe-view .edit-recipe {{ display: none; }}
-      .recipe-view .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; }}
-      .recipe-view .recipe-form h2 {{ font-size: 1.05rem; }}
-      .recipe-view .recipe-form .secondary-button {{ display: none; }}
+      .grid .card-meta,
+      .grid .recipe-prerequisite,
+      .grid .recipe-ingredients,
+      .grid .recipe-instructions,
+      .grid .recipe-notes,
+      .grid .edit-recipe {{ display: none; }}
+      .grid .card-header {{ margin-bottom: 12px; }}
+      .grid .card-image img {{ margin: 0; }}
+      .recipe-page .card-image {{ display: flex; justify-content: flex-start; }}
+      .recipe-page .card-image a {{ width: min(220px, 100%); }}
+      .recipe-page .card-image img {{ max-height: 220px; margin: 0; }}
+      .recipe-page .edit-recipe {{ display: none; }}
+      .recipe-page .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; }}
+      .recipe-page .recipe-form h2 {{ font-size: 1.05rem; }}
       .recipe-notes {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
       .recipe-notes h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-notes textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #171a21; color: #eceef3; font: inherit; }}
@@ -375,6 +371,9 @@ def render_html(
       .edit-recipe:focus-visible {{ outline: 2px solid #8db7ff; outline-offset: 3px; }}
       dialog {{ width: min(520px, calc(100% - 32px)); border: 1px solid #3a414f; border-radius: 12px; padding: 0; background: #171a21; color: #eceef3; }}
       dialog::backdrop {{ background: rgba(0, 0, 0, 0.72); }}
+      dialog.recipe-page {{ width: min(900px, calc(100% - 32px)); max-height: calc(100% - 32px); }}
+      .recipe-page .card {{ border: 0; }}
+      .close-recipe-page {{ margin: 16px 16px 0; }}
       .recipe-form {{ display: grid; gap: 14px; padding: 22px; }}
       .recipe-form h2 {{ margin: 0; }}
       .recipe-form label {{ display: grid; gap: 6px; color: #cbd1dc; }}
@@ -437,7 +436,6 @@ def render_html(
         <p id="import-status" role="status" aria-live="polite"></p>
         <a id="import-refresh" href="index.html" hidden>{t.html('import_refresh')}</a>
       </div>
-      <a class="back-to-cookbook" href="index.html">{t.html('back_to_all_recipes')}</a>
       <div class="recipe-search" id="recipe-search" role="search" aria-label="{t.html('search_recipes')}">
         <label>{t.html('filter_type')} <select id="search-type"><option value="">{t.html('filter_all')}</option></select></label>
         <label>{t.html('filter_source')} <select id="search-source"><option value="">{t.html('filter_all')}</option><option value="lizapanelim">{t.html('source_lizapanelim')}</option><option value="unknown">{t.html('source_unknown')}</option></select></label>
@@ -445,6 +443,10 @@ def render_html(
       <section class=\"grid\" id=\"recipe-grid\"></section>
       <p class="no-filter-results" id="no-filter-results" hidden>{t.html('no_filter_results')}</p>
     </main>
+    <dialog class="recipe-page" id="recipe-page">
+      <button class="secondary-button close-recipe-page" id="close-recipe-page" type="button">{t.html('back_to_all_recipes')}</button>
+      <div id="recipe-page-card"></div>
+    </dialog>
     <dialog id="recipe-dialog">
       <form class="recipe-form" id="recipe-form">
         <h2 id="recipe-form-title">{t.html('add_recipe_title')}</h2>
@@ -488,6 +490,8 @@ def render_html(
         const baseRecipes = {base_recipes_json};
         const grid = document.getElementById("recipe-grid");
         const dialog = document.getElementById("recipe-dialog");
+        const recipePage = document.getElementById("recipe-page");
+        const recipePageCard = document.getElementById("recipe-page-card");
         const form = document.getElementById("recipe-form");
         const formTitle = document.getElementById("recipe-form-title");
         const idInput = document.getElementById("recipe-id");
@@ -574,7 +578,6 @@ def render_html(
         const notRecipeButton = document.getElementById("not-recipe");
         const saveStatus = document.getElementById("save-status");
         const selectedRecipeId = new URLSearchParams(window.location.search).get("recipe");
-        document.body.classList.add(selectedRecipeId ? "recipe-view" : "cookbook-view");
         const baseIds = new Set(baseRecipes.map((recipe) => recipe.id));
         let state;
         try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
@@ -662,6 +665,7 @@ def render_html(
           card.querySelector(".recipe-detail-link").textContent = recipe.title;
           const detailUrl = `index.html?recipe=${{encodeURIComponent(recipe.id)}}`;
           card.querySelector(".recipe-detail-link").href = detailUrl;
+          card.querySelector(".recipe-detail-link").dataset.openRecipe = recipe.id;
           const source = card.querySelector(".source-link");
           const newSource = linkRow(safeLink(recipe.sourceUrl), {t.js('instagram')}, "source-link") || document.createElement("p");
           newSource.className ||= "link-row source-link"; newSource.hidden = !recipe.sourceUrl;
@@ -714,11 +718,12 @@ def render_html(
           prerequisiteLink.href = prerequisiteSelect.value
             ? `index.html?recipe=${{encodeURIComponent(prerequisiteSelect.value)}}`
             : "#";
+          prerequisiteLink.dataset.openRecipe = prerequisiteSelect.value;
           const imageBox = card.querySelector(".card-image"); imageBox.replaceChildren();
           const imageUrl = safeLink(recipe.imageUrl);
           if (imageUrl) {{
             const image = document.createElement("img"); image.src = imageUrl; image.alt = recipe.title; image.loading = "lazy";
-            const imageLink = document.createElement("a"); imageLink.href = detailUrl; imageLink.setAttribute("aria-label", fmt({t.js('recipe_details')}, {{ title: recipe.title }})); imageLink.append(image); imageBox.append(imageLink);
+            const imageLink = document.createElement("a"); imageLink.href = detailUrl; imageLink.dataset.openRecipe = recipe.id; imageLink.setAttribute("aria-label", fmt({t.js('recipe_details')}, {{ title: recipe.title }})); imageLink.append(image); imageBox.append(imageLink);
           }}
           card.dataset.recipe = JSON.stringify(recipe);
         }};
@@ -728,6 +733,8 @@ def render_html(
           updateCard(card, recipe); return card;
         }};
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
+        const gridCard = (id) => grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`);
+        const openDialog = () => recipePage.open ? recipePage : dialog;
         const openEditor = (recipe, isCustom, inline = false) => {{
           form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; typeInput.value = recipeType(recipe); closeTypeList(); recipeUrlInput.value = recipe.recipeUrl || "";
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
@@ -750,7 +757,6 @@ def render_html(
           searchType.value = types.includes(selected) ? selected : "";
         }};
         const applySourceFilter = () => {{
-          if (selectedRecipeId) return;
           refreshTypeOptions();
           const criteria = {{ type: searchType.value, source: searchSource.value }};
           let anyVisible = false;
@@ -768,15 +774,42 @@ def render_html(
         state.order.forEach((id) => grid.append(createCard(recipesById.get(id))));
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
         applySourceFilter();
-        if (selectedRecipeId) {{
-          grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{ card.hidden = card.dataset.recipeId !== selectedRecipeId; }});
-          document.getElementById("add-recipe").hidden = true;
-          const selectedCard = grid.querySelector(`[data-recipe-id="${{CSS.escape(selectedRecipeId)}}"]`);
-          if (selectedCard) {{
-            selectedCard.append(form);
-            openEditor(recipeFromCard(selectedCard), !baseIds.has(selectedRecipeId), true);
+        // Recipes open in a popup over the home page; the grid card stays the source of truth.
+        let pushedRecipeUrl = false;
+        const showRecipe = (id, updateUrl = true) => {{
+          const selectedCard = gridCard(id); if (!selectedCard) return;
+          const recipe = recipeFromCard(selectedCard);
+          const card = createCard(recipe); card.removeAttribute("id");
+          card.append(form);
+          recipePageCard.replaceChildren(card);
+          openEditor(recipe, !baseIds.has(id), true);
+          if (updateUrl) {{
+            const url = `index.html?recipe=${{encodeURIComponent(id)}}`;
+            if (recipePage.open) history.replaceState({{ recipe: id }}, "", url);
+            else {{ history.pushState({{ recipe: id }}, "", url); pushedRecipeUrl = true; }}
           }}
-        }}
+          if (!recipePage.open) recipePage.showModal();
+          recipePage.scrollTop = 0;
+        }};
+        recipePage.addEventListener("close", () => {{
+          dialog.append(form); recipePageCard.replaceChildren(); closeTypeList();
+          if (!new URLSearchParams(window.location.search).has("recipe")) return;
+          if (pushedRecipeUrl) history.back(); else history.replaceState(null, "", "index.html");
+          pushedRecipeUrl = false;
+        }});
+        window.addEventListener("popstate", () => {{
+          const id = new URLSearchParams(window.location.search).get("recipe");
+          if (id) {{ showRecipe(id, false); return; }}
+          pushedRecipeUrl = false;
+          if (recipePage.open) recipePage.close();
+        }});
+        document.addEventListener("click", (event) => {{
+          const link = event.target.closest("a[data-open-recipe]");
+          if (!link || !link.dataset.openRecipe || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault(); showRecipe(link.dataset.openRecipe);
+        }});
+        document.getElementById("close-recipe-page").addEventListener("click", () => recipePage.close());
+        if (selectedRecipeId) showRecipe(selectedRecipeId, false);
         if (!grid.children.length) grid.innerHTML = "<p>{t.html('no_recipes')}</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
         if (savedScrollPosition !== null) {{
@@ -787,23 +820,23 @@ def render_html(
         }}
         document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown" }}, true));
         document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
-        document.getElementById("cancel-recipe").addEventListener("click", () => dialog.close());
-        grid.addEventListener("input", (event) => {{
+        document.getElementById("cancel-recipe").addEventListener("click", () => openDialog().close());
+        recipePageCard.addEventListener("input", (event) => {{
           const notes = event.target.closest(".recipe-notes textarea"); if (!notes) return;
           const card = notes.closest("[data-recipe-id]");
-          const recipe = {{ ...recipeFromCard(card), notes: notes.value }};
-          card.dataset.recipe = JSON.stringify(recipe);
+          const recipe = {{ ...recipeFromCard(gridCard(card.dataset.recipeId)), notes: notes.value }};
+          card.dataset.recipe = gridCard(recipe.id).dataset.recipe = JSON.stringify(recipe);
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
           save(card.querySelector(".recipe-notes-status"));
         }});
-        grid.addEventListener("change", (event) => {{
+        recipePageCard.addEventListener("change", (event) => {{
           const select = event.target.closest(".recipe-prerequisite select"); if (!select) return;
           const card = select.closest("[data-recipe-id]");
-          const recipe = {{ ...recipeFromCard(card), prerequisiteId: select.value }};
+          const recipe = {{ ...recipeFromCard(gridCard(card.dataset.recipeId)), prerequisiteId: select.value }};
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
-          save(card.querySelector(".prerequisite-status")); updateCard(card, recipe);
+          save(card.querySelector(".prerequisite-status")); updateCard(gridCard(recipe.id), recipe); updateCard(card, recipe);
         }});
         grid.addEventListener("click", (event) => {{
           const button = event.target.closest(".edit-recipe"); if (!button) return;
@@ -849,16 +882,16 @@ def render_html(
           const saved = save(saveStatus); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.append(createCard(recipe));
           grid.querySelectorAll("[data-recipe-id]").forEach((recipeCard) => updateCard(recipeCard, recipeFromCard(recipeCard)));
           applySourceFilter();
+          const container = openDialog();
           if (!await saved) return;
-          if (!selectedRecipeId) setTimeout(() => dialog.close(), 350);
+          setTimeout(() => container.close(), 350);
         }});
         deleteButton.addEventListener("click", async () => {{
           const id = idInput.value; if (!id || baseIds.has(id)) return;
           state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); if (!await save(saveStatus)) return; grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
           applySourceFilter();
-          if (selectedRecipeId) window.location.href = "index.html";
-          else dialog.close();
+          openDialog().close();
         }});
         notRecipeButton.addEventListener("click", async () => {{
           const id = idInput.value; if (!id || !baseIds.has(id)) return;
@@ -875,8 +908,7 @@ def render_html(
           state.order = state.order.filter((recipeId) => recipeId !== id);
           grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           applySourceFilter();
-          if (selectedRecipeId) window.location.href = "index.html";
-          else dialog.close();
+          openDialog().close();
         }});
       }})();
     </script>

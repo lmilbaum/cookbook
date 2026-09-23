@@ -193,17 +193,16 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2>', document)
         self.assertIn('"id": "recipe-1", "title": ""', document)
 
-    def test_main_cards_link_to_a_dedicated_recipe_view(self) -> None:
+    def test_main_cards_open_the_recipe_in_a_popup(self) -> None:
         document = render_html([make_recipe()], "favicon.svg")
 
-        self.assertIn('document.body.classList.add(selectedRecipeId ? "recipe-view" : "cookbook-view")', document)
-        self.assertIn('.cookbook-view .recipe-ingredients,', document)
-        self.assertIn('.recipe-view .card-image a { width: min(220px, 100%); }', document)
-        self.assertIn('.recipe-view .recipe-form { margin-top: 16px;', document)
+        self.assertIn('<dialog class="recipe-page" id="recipe-page">', document)
+        self.assertIn('.grid .recipe-ingredients,', document)
+        self.assertIn('.recipe-page .card-image a { width: min(220px, 100%); }', document)
+        self.assertIn('.recipe-page .recipe-form { margin-top: 16px;', document)
         self.assertIn('const detailUrl = `index.html?recipe=${encodeURIComponent(recipe.id)}`', document)
-        self.assertIn('card.hidden = card.dataset.recipeId !== selectedRecipeId', document)
-        self.assertIn('selectedCard.append(form)', document)
-        self.assertIn('openEditor(recipeFromCard(selectedCard), !baseIds.has(selectedRecipeId), true)', document)
+        self.assertIn('if (selectedRecipeId) showRecipe(selectedRecipeId, false)', document)
+        self.assertNotIn('class="back-to-cookbook"', document)
 
     def test_existing_and_custom_recipes_use_the_same_card_factory(self) -> None:
         document = render_html([make_recipe()], "favicon.svg")
