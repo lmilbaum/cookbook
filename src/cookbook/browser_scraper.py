@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib
 import re
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -381,6 +382,85 @@ def _shortcode_from_media_path(media_path: str) -> str:
     return shortcode_match.group(1) if shortcode_match else media_path.strip("/")
 
 
+_PROFILE_HREF_RE = re.compile(r"^/([A-Za-z0-9._]+)/$")
+_INSTAGRAM_PATH_PREFIXES = frozenset({
+    "p", "reel", "stories", "explore", "reels", "tv", "ar", "accounts", "direct",
+})
+
+
+def _extract_poster_username(page: Any) -> str:
+    """Extract the post author's Instagram username from the post page.
+
+    Tries the og:url meta tag first — Instagram sets it to
+    /username/p/shortcode/ even when the direct URL omits the username, making
+    it the most reliable source.  Falls back to article-scoped links (never the
+    full page, to avoid picking up the logged-in user's nav-bar avatar).
+    """
+
+    try:
+        og_url: str = page.evaluate(
+            'document.querySelector(\'meta[property="og:url"]\')?.content || ""'
+        ) or ""
+        m = re.search(r"instagram\.com/([A-Za-z0-9._]+)/(p|reel)/", og_url)
+        if m and m.group(1) not in _INSTAGRAM_PATH_PREFIXES:
+            return m.group(1)
+    except Exception:
+        pass
+
+    for scope in ('article header a[href^="/"]', 'article a[href^="/"]'):
+        hrefs: list[str] = page.locator(scope).evaluate_all(
+            'elements => elements.map(e => e.getAttribute("href") || "")'
+        )
+        usernames = [
+            m.group(1) for href in hrefs
+            if (m := _PROFILE_HREF_RE.match(href)) and m.group(1) not in _INSTAGRAM_PATH_PREFIXES
+        ]
+        if usernames:
+            return Counter(usernames).most_common(1)[0][0]
+    return ""
+
+
+def _extract_poster_display_name(page: Any, username: str = "") -> str:
+    """Extract the post author's display name from the article header.
+
+    Reads the visible rendered text rather than meta tags to get the exact
+    spelling shown on the page.  Falls back to og:title parsing.
+    """
+
+    if username:
+        try:
+            name: str = page.evaluate(
+                """(handle) => {
+                    const header = document.querySelector('article header');
+                    if (!header) return '';
+                    for (const el of header.querySelectorAll('span, div')) {
+                        const text = (el.textContent || '').trim();
+                        if (text && text !== handle && el.childElementCount === 0
+                                && text.length > 1 && !text.includes('\\n')) {
+                            return text;
+                        }
+                    }
+                    return '';
+                }""",
+                username,
+            ) or ""
+            if name:
+                return name.strip()
+        except Exception:
+            pass
+
+    try:
+        og_title: str = page.evaluate(
+            'document.querySelector(\'meta[property="og:title"]\')?.content || ""'
+        ) or ""
+        m = re.match(r"^(.+?)\s+on Instagram\b", og_title, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _extract_caption(page: Any) -> str:
     """Extract a caption from the article, with metadata fallback."""
 
@@ -448,6 +528,29 @@ def _fetch_post_details(
         typename="GraphVideo" if is_video else "GraphImage",
         is_video=is_video,
     )
+    username = _extract_poster_username(page)
+    if username:
+        recipe._instagram_username = username
+        display_name = _extract_poster_display_name(page, username)
+        if display_name:
+            recipe._instagram_display_name = display_name
+    if is_video and image_url.startswith("http"):
+        try:
+            response = page.request.get(image_url)
+            if response.ok:
+                body = response.body()
+                if body:
+                    suffix = Path(urlsplit(image_url).path).suffix.lower()
+                    ct = response.headers.get("content-type", "").split(";")[0].strip()
+                    recipe._photo_bytes = body
+                    recipe._photo_content_type = ct or (
+                        "image/jpeg" if suffix in {".jpg", ".jpeg"} else
+                        "image/png" if suffix == ".png" else
+                        "image/webp" if suffix == ".webp" else
+                        "image/jpeg"
+                    )
+        except Exception:  # noqa: BLE001
+            pass
     return recipe
 
 
@@ -475,6 +578,53 @@ def _new_context(browser: Any, session_state: Path | None, block_media: bool = F
 
         context.route("**/*", _route_handler)
     return context
+
+
+def fetch_post_by_url_browser(
+    media_path: str,
+    headless: bool = True,
+    timeout_seconds: int = 30,
+    session_file: str = ".instagram.session",
+) -> Recipe | None:
+    """Scrape a single post or reel using the saved browser session.
+
+    Returns None when the session file is missing, the post cannot be reached,
+    or any other error occurs during scraping.  For reels, tries a video-element
+    screenshot when the CDN blocks the cover-image URL.
+    """
+
+    playwright = _load_playwright()
+    browser_session = _browser_session_path(session_file)
+    if not browser_session.exists():
+        return None
+
+    with playwright.sync_playwright() as playwright_driver:
+        browser = playwright_driver.chromium.launch(headless=headless)
+        context = _new_context(browser, browser_session, block_media=False)
+        page = context.new_page()
+        try:
+            recipe = _fetch_post_details(page, media_path, timeout_seconds)
+            if (
+                recipe.post is not None
+                and recipe.post.is_video
+                and not getattr(recipe, "_photo_bytes", None)
+            ):
+                try:
+                    video_el = page.locator("video").first
+                    if video_el.count() > 0:
+                        video_el.scroll_into_view_if_needed(timeout=3000)
+                        body = video_el.screenshot()
+                        if body:
+                            recipe._photo_bytes = body
+                            recipe._photo_content_type = "image/png"
+                except Exception:  # noqa: BLE001
+                    pass
+            return recipe
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            context.close()
+            browser.close()
 
 
 def fetch_posts_browser(

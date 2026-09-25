@@ -72,7 +72,7 @@ def test_enter_creates_the_type_and_updates_the_recipe(page):
 def test_choosing_an_existing_type_does_not_create_a_duplicate(page):
     calls = _open_recipe_page(page, ["עוגה", "סלט"])
     page.locator("#recipe-type").click()
-    assert page.locator("#recipe-type-list li").all_inner_texts() == ["לא ידוע", "סלט", "עוגה"]
+    assert page.locator("#recipe-type-list li").all_inner_texts() == ["סלט", "עוגה", "לא ידוע"]
     page.locator("#recipe-type-list li", has_text="סלט").click()
 
     page.wait_for_function("document.getElementById('save-status').textContent !== ''")
@@ -96,16 +96,22 @@ def test_arrow_keys_and_enter_pick_a_filtered_type(page):
 
 
 def test_all_recipes_show_initially_and_filters_update_immediately(page):
+    other = Recipe(
+        id="r2", image_url="", caption="Jam", timestamp_utc="2026-08-25T12:00:00Z",
+        title="Jam", recipe_url="https://example.com/jam", recipe_name="Jam", source="unknown",
+    )
     _open_recipe_page(page, ["עוגה"])
+    page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
+        content_type="text/html", body=render_html([_recipe(), other], "example", "favicon.svg")))
     page.goto(f"{BASE}/index.html")
     page.locator("#recipe-search").wait_for()
     assert page.get_by_role("button", name="חיפוש").count() == 0
-    assert page.locator("[data-recipe-id]:visible").count() == 1
+    assert page.locator("[data-recipe-id]:visible").count() == 2
     assert page.locator("#no-filter-results").is_hidden()
 
     page.select_option("#search-source", "unknown")
-    assert page.locator("[data-recipe-id]:visible").count() == 0
-    assert page.locator("#no-filter-results").is_visible()
+    assert page.locator("[data-recipe-id]:visible").count() == 1
+    assert page.locator("#no-filter-results").is_hidden()
 
     page.select_option("#search-source", "lizapanelim")
     assert page.locator("[data-recipe-id]:visible").count() == 1
@@ -175,3 +181,46 @@ def test_source_filter_uses_unknown_for_recipes_from_other_sites(page):
     assert page.locator("[data-recipe-id]:visible").evaluate_all("els => els.map(e => e.dataset.recipeId)") == ["r2"]
     page.select_option("#search-source", "lizapanelim")
     assert page.locator("[data-recipe-id]:visible").evaluate_all("els => els.map(e => e.dataset.recipeId)") == ["r1"]
+
+
+def test_saving_existing_custom_instagram_recipe_triggers_import_and_updates_source(page):
+    """Regression: a custom-... entry with an Instagram URL must re-import on save,
+    replacing the custom id with the real shortcode and setting the correct source profile."""
+    custom_id = "custom-1234567890-abc"
+    current_state = [{"overrides": {}, "custom": [{
+        "id": custom_id, "title": "Reel Recipe", "source": "unknown",
+        "sourceUrl": "https://www.instagram.com/reel/SomeShortcode/",
+        "recipeUrl": "", "recipeName": "", "recipeUrls": [], "recipeNames": [],
+        "imageUrl": "", "ingredients": [], "instructions": "",
+        "type": "לא ידוע", "prerequisiteId": "", "notes": "",
+    }], "order": [custom_id]}]
+    import_calls = []
+
+    def recipe_state(route):
+        if route.request.method == "PUT":
+            current_state[0] = route.request.post_data_json["state"]
+            route.fulfill(json={"revision": 2})
+        else:
+            route.fulfill(json={"revision": 1, "state": current_state[0]})
+
+    def do_import(route):
+        import_calls.append(route.request.post_data_json)
+        route.fulfill(json={"id": "SomeShortcode", "source": "otherchef"})
+
+    _open_recipe_page(page, [])
+    page.route(f"{BASE}/api/recipe-state", recipe_state)
+    page.route(f"{BASE}/api/import-instagram-url", do_import)
+    page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
+        content_type="text/html", body=render_html([_recipe()], "example", "favicon.svg")))
+    page.goto(f"{BASE}/index.html?recipe={custom_id}")
+    page.locator("#recipe-title").wait_for()
+    assert page.locator("#recipe-title").input_value() == "Reel Recipe"
+
+    with page.expect_navigation(timeout=8000):
+        page.locator("#recipe-form button[type=submit]").click()
+
+    assert import_calls == [{"url": "https://www.instagram.com/reel/SomeShortcode/"}]
+    saved = current_state[0]
+    assert not any(r["id"] == custom_id for r in saved.get("custom", []))
+    assert "SomeShortcode" in saved.get("overrides", {})
+    assert saved["overrides"]["SomeShortcode"]["source"] == "otherchef"

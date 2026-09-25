@@ -133,6 +133,54 @@ def test_import_command_loads_existing_asset_files_and_keeps_them(factory, tmp_p
     assert sorted(path.name for path in assets.iterdir()) == ["BCP_gsMu-WY.jpg", "notes.txt", "other.png"]
 
 
+def _reel(code: str, image_url: str = "https://cdn.example/x.jpg") -> Recipe:
+    recipe = Recipe(id=code, image_url=image_url, caption="", timestamp_utc="2026-01-01")
+    recipe.post = Post(shortcode=code, url="https://example.com", typename="GraphVideo", is_video=True)
+    return recipe
+
+
+def test_reel_photo_bytes_are_stored_directly_without_url_download(factory, monkeypatch) -> None:
+    downloaded = []
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", lambda r: downloaded.append(r.id) or None)
+    reel = _reel("reel-abc")
+    reel._photo_bytes = b"JPEG_COVER"
+    reel._photo_content_type = "image/jpeg"
+    assert recipe_photo_fetch.store_missing_photos(factory, [reel]) == 1
+    assert downloaded == []
+    assert load_recipe_photo(factory, "reel-abc") == (b"JPEG_COVER", "image/jpeg")
+
+
+def test_reel_without_prefetched_bytes_falls_back_to_url_download(factory, monkeypatch) -> None:
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", lambda r: (b"downloaded", "image/jpeg"))
+    reel = _reel("reel-xyz")
+    assert recipe_photo_fetch.store_missing_photos(factory, [reel]) == 1
+    assert load_recipe_photo(factory, "reel-xyz") == (b"downloaded", "image/jpeg")
+
+
+def test_reel_fallback_url_uses_reel_path_not_post_path(monkeypatch) -> None:
+    requested = []
+
+    class Response:
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def read(self) -> bytes: return self.body
+
+    def urlopen(request, timeout):
+        requested.append(request.full_url)
+        if "reel" in request.full_url:
+            return Response(b"image")
+        raise OSError("expired")
+
+    monkeypatch.setattr(recipe_photo_fetch, "urlopen", urlopen)
+    reel = _reel("Dabc123", image_url="https://cdn.example/x.jpg")
+    result = recipe_photo_fetch.download_photo(reel)
+    assert result == (b"image", "image/jpeg")
+    assert any("reel" in url for url in requested)
+    assert not any("/p/" in url for url in requested)
+
+
 def test_migration_creates_the_table_the_model_expects() -> None:
     engine = create_engine("sqlite://")
     migration = load_migration("20260921_01_recipe_photos.py")

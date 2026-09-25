@@ -23,9 +23,10 @@ def download_photo(recipe: Recipe) -> tuple[bytes, str] | None:
     content_type = PHOTO_CONTENT_TYPES.get(suffix, "image/jpeg")
     candidate_urls = [image_url]
     if recipe.post is not None:
+        path_type = "reel" if recipe.post.is_video else "p"
         candidate_urls += [
-            f"https://www.instagram.com/p/{recipe.post.shortcode}/media/?size=l",
-            f"https://www.instagram.com/p/{recipe.post.shortcode}/media/?size=m",
+            f"https://www.instagram.com/{path_type}/{recipe.post.shortcode}/media/?size=l",
+            f"https://www.instagram.com/{path_type}/{recipe.post.shortcode}/media/?size=m",
         ]
     for candidate_url in candidate_urls:
         request = Request(
@@ -55,7 +56,15 @@ def store_missing_photos(factory: sessionmaker[Session], recipes: Iterable[Recip
     stored = photo_ids(factory)
     count = 0
     for recipe in recipes:
-        if recipe.id in stored or not recipe.image_url.strip().startswith("http"):
+        if recipe.id in stored:
+            continue
+        photo_bytes = getattr(recipe, "_photo_bytes", None)
+        if photo_bytes is not None:
+            photo_ct = getattr(recipe, "_photo_content_type", "image/jpeg")
+            if insert_recipe_photo(factory, recipe.id, photo_ct, photo_bytes):
+                count += 1
+            continue
+        if not recipe.image_url.strip().startswith("http"):
             continue
         photo = download_photo(recipe)
         if photo is not None and insert_recipe_photo(factory, recipe.id, photo[1], photo[0]):

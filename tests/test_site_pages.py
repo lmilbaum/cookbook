@@ -83,6 +83,7 @@ class RenderHtmlTests(unittest.TestCase):
                 "title": recipe.title,
                 "sourceUrl": recipe.post.url,
                 "source": recipe.source,
+                "sourceName": recipe.source_name,
                 "recipeUrl": recipe.recipe_url,
                 "recipeName": "primary",
                 "recipeUrls": [recipe.recipe_url],
@@ -275,6 +276,22 @@ class RenderHtmlTests(unittest.TestCase):
 
         self.assertIn('openEditor({ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown" }, true)', document)
         self.assertIn('source: previous.source || "unknown"', document)
+
+    def test_unknown_type_sorts_last_in_type_filter_dropdown(self) -> None:
+        document = render_html([make_recipe()], "favicon.svg")
+
+        self.assertIn(
+            "a === unknownType ? 1 : b === unknownType ? -1 : a.localeCompare(b",
+            document,
+        )
+
+    def test_unknown_source_sorts_last_in_source_filter_dropdown(self) -> None:
+        document = render_html([make_recipe()], "favicon.svg")
+
+        self.assertIn(
+            'a === "unknown" ? 1 : b === "unknown" ? -1 : a.localeCompare(b)',
+            document,
+        )
 
     def test_shopping_list_displays_items_alphabetically(self) -> None:
         document = render_shopping_list_html("favicon.svg")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re as _re
 import sys
 from pathlib import Path
 
@@ -10,13 +11,25 @@ from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .browser_scraper import IncompleteProfileError, fetch_posts_browser
+from .browser_scraper import IncompleteProfileError, fetch_post_by_url_browser, fetch_posts_browser
 from .config import load_config, resolve_from
+
+_INSTAGRAM_MEDIA_RE = _re.compile(r"instagram\.com(/(?:p|reel)/[A-Za-z0-9_-]+)")
 from .database import create_session_factory
 from .import_service import REASON_PREFIX
-from .models import Post
+from .models import Post, Recipe
 from .post_repository import insert_missing_recipes
 from .recipe_photo_fetch import store_missing_photos
+
+
+def _promote_instagram_attrs(recipe: Recipe) -> None:
+    """Copy transient scraper attrs to the persistent source/source_name columns."""
+    source = getattr(recipe, "_instagram_username", "")
+    source_name = getattr(recipe, "_instagram_display_name", "")
+    if source:
+        recipe.source = source
+    if source_name:
+        recipe.source_name = source_name
 
 
 def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
@@ -37,9 +50,45 @@ def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
     ][:1]
     if not recipes:
         return 0
+    for recipe in recipes:
+        _promote_instagram_attrs(recipe)
     imported = insert_missing_recipes(factory, recipes)
     store_missing_photos(factory, recipes)
     return imported
+
+
+def import_post_by_url(
+    root: Path, factory: sessionmaker[Session], url: str
+) -> tuple[str, str, str] | None:
+    """Scrape a specific Instagram post URL and store it in the database.
+
+    Returns ``(shortcode, instagram_username, display_name)`` on success, or
+    None if the URL is not a recognised Instagram post/reel path, the browser
+    session is missing, or scraping fails.  Both ``instagram_username`` and
+    ``display_name`` are empty strings when they could not be extracted.
+    """
+
+    match = _INSTAGRAM_MEDIA_RE.search(url)
+    if not match:
+        return None
+    media_path = match.group(1).rstrip("/") + "/"
+
+    config = load_config(root / "cookbook.toml")
+    load_dotenv(resolve_from(root, config.env_file))
+    session_file = str(resolve_from(root, config.session_file))
+
+    recipe = fetch_post_by_url_browser(media_path, session_file=session_file)
+    if recipe is None:
+        return None
+
+    # Capture before session operations expire mapped attrs.
+    _promote_instagram_attrs(recipe)
+    shortcode = recipe.id
+    source = recipe.source if getattr(recipe, "_instagram_username", "") else ""
+    source_name = recipe.source_name if getattr(recipe, "_instagram_display_name", "") else ""
+    insert_missing_recipes(factory, [recipe])
+    store_missing_photos(factory, [recipe])
+    return shortcode, source, source_name
 
 
 def main() -> None:

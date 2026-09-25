@@ -57,6 +57,7 @@ class Recipe(MappedAsDataclass, Base, kw_only=True):
     recipe_url: Mapped[str] = mapped_column(Text, default="")
     recipe_name: Mapped[str] = mapped_column(Text, default="")
     source: Mapped[str] = mapped_column(String(32), default="lizapanelim")
+    source_name: Mapped[str] = mapped_column(Text, default="", server_default="")
     # One-directional on purpose: a Post -> Recipe back-reference would make
     # dataclasses.asdict()/equality recurse Recipe.post.recipe.post... forever.
     #

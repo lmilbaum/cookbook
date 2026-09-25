@@ -24,7 +24,7 @@ def valid_state(value: object) -> bool:
     if not isinstance(overrides, dict) or not isinstance(custom, list):
         return False
     strings = {"id", "title", "recipeUrl", "recipeName", "sourceUrl", "imageUrl",
-               "instructions", "type", "source", "prerequisiteId", "notes", "timestamp"}
+               "instructions", "type", "source", "sourceName", "prerequisiteId", "notes", "timestamp"}
     arrays = {"recipeUrls", "recipeNames"}
     for recipe in [*overrides.values(), *custom]:
         if not isinstance(recipe, dict) or set(recipe) - strings - arrays - {"ingredients"}:

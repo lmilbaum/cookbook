@@ -222,6 +222,7 @@ def render_html(
                 "title": title,
                 "sourceUrl": recipe.post.url if recipe.post else "",
                 "source": recipe.source,
+                "sourceName": recipe.source_name,
                 "recipeUrl": recipe_url,
                 "recipeName": recipe_name,
                 "recipeUrls": recipe_urls,
@@ -438,7 +439,7 @@ def render_html(
       </div>
       <div class="recipe-search" id="recipe-search" role="search" aria-label="{t.html('search_recipes')}">
         <label>{t.html('filter_type')} <select id="search-type"><option value="">{t.html('filter_all')}</option></select></label>
-        <label>{t.html('filter_source')} <select id="search-source"><option value="">{t.html('filter_all')}</option><option value="lizapanelim">{t.html('source_lizapanelim')}</option><option value="unknown">{t.html('source_unknown')}</option></select></label>
+        <label>{t.html('filter_source')} <select id="search-source"><option value="">{t.html('filter_all')}</option></select></label>
       </div>
       <section class=\"grid\" id=\"recipe-grid\"></section>
       <p class="no-filter-results" id="no-filter-results" hidden>{t.html('no_filter_results')}</p>
@@ -461,6 +462,7 @@ def render_html(
         </div>
         <label>{t.html('recipe_link')} <input id="recipe-url" type="url" dir="ltr" placeholder="https://..." /></label>
         <label>{t.html('source_link')} <input id="source-url" type="url" dir="ltr" placeholder="https://..." /></label>
+        <button type="button" id="reimport-source" class="secondary-button" hidden>{t.html('reimport_source')}</button>
         <label>{t.html('image_link')} <input id="image-url" type="text" dir="ltr" placeholder="https://..." /></label>
         <div class="ingredients-editor">
           <span>{t.html('ingredients')}</span>
@@ -506,7 +508,7 @@ def render_html(
         const unknownType = {json.dumps(_UNKNOWN_TYPE, ensure_ascii=False)};
         let typeNames = [];
         const recipeType = (recipe) => (recipe.type || "").trim() || unknownType;
-        const knownTypes = (extra) => [...new Set([unknownType, extra, ...typeNames, ...[...grid.querySelectorAll("[data-recipe-id]")].map((card) => recipeType(recipeFromCard(card)))].filter(Boolean))].sort((a, b) => a.localeCompare(b, {t.lang_js}));
+        const knownTypes = (extra) => [...new Set([unknownType, extra, ...typeNames, ...[...grid.querySelectorAll("[data-recipe-id]")].map((card) => recipeType(recipeFromCard(card)))].filter(Boolean))].sort((a, b) => a === unknownType ? 1 : b === unknownType ? -1 : a.localeCompare(b, {t.lang_js}));
         let typeItems = [];
         let typeActive = -1;
         let typeFiltering = false;
@@ -576,6 +578,7 @@ def render_html(
         }});
         const deleteButton = document.getElementById("delete-recipe");
         const notRecipeButton = document.getElementById("not-recipe");
+        const reimportButton = document.getElementById("reimport-source");
         const saveStatus = document.getElementById("save-status");
         const selectedRecipeId = new URLSearchParams(window.location.search).get("recipe");
         const baseIds = new Set(baseRecipes.map((recipe) => recipe.id));
@@ -744,6 +747,7 @@ def render_html(
           instructionsInput.value = recipe.instructions || "";
           formTitle.textContent = recipe.id ? {t.js('edit_recipe')} : {t.js('add_recipe_title')}; deleteButton.hidden = !isCustom;
           notRecipeButton.hidden = isCustom || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
+          reimportButton.hidden = !/instagram\\.com\\/(p|reel)\\//.test(recipe.sourceUrl || "");
           if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
         const noFilterResults = document.getElementById("no-filter-results");
@@ -756,14 +760,34 @@ def render_html(
           searchType.replaceChildren(new Option({t.js('filter_all')}, ""), ...types.map((type) => new Option(type, type)));
           searchType.value = types.includes(selected) ? selected : "";
         }};
+        const recipeEffectiveSource = (recipe) => {{
+          const src = recipe.source || "unknown";
+          if (src !== "unknown") return src;
+          const igMatch = recipe.sourceUrl && /instagram\\.com\\/(?!p\\/|reel\\/)([A-Za-z0-9._]+)\\/(?:p|reel)\\//.exec(recipe.sourceUrl);
+          return igMatch ? igMatch[1] : "unknown";
+        }};
+        const sourceLabel = (s) => s === "unknown" ? {t.js('source_unknown')} : s;
+        const refreshSourceOptions = () => {{
+          const sourceNames = new Map();
+          for (const card of grid.querySelectorAll("[data-recipe-id]")) {{
+            const recipe = recipeFromCard(card);
+            const src = recipeEffectiveSource(recipe);
+            if (!sourceNames.has(src)) sourceNames.set(src, recipe.sourceName || sourceLabel(src));
+          }}
+          const sources = [...sourceNames.keys()].sort((a, b) => a === "unknown" ? 1 : b === "unknown" ? -1 : a.localeCompare(b));
+          const selected = searchSource.value;
+          searchSource.replaceChildren(new Option({t.js('filter_all')}, ""), ...sources.map((s) => new Option(sourceNames.get(s), s)));
+          searchSource.value = sources.includes(selected) ? selected : "";
+        }};
         const applySourceFilter = () => {{
           refreshTypeOptions();
+          refreshSourceOptions();
           const criteria = {{ type: searchType.value, source: searchSource.value }};
           let anyVisible = false;
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{
             const recipe = recipeFromCard(card);
             const visible = (!criteria.type || recipeType(recipe) === criteria.type)
-              && (!criteria.source || (recipe.source === "lizapanelim" ? "lizapanelim" : "unknown") === criteria.source);
+              && (!criteria.source || recipeEffectiveSource(recipe) === criteria.source);
             card.hidden = !visible;
             if (visible) anyVisible = true;
           }});
@@ -876,6 +900,30 @@ def render_html(
           }};
           if (!recipe.title) return;
           await addTypeName(recipe.type);
+          const isInstagramImportable = !baseIds.has(existingId) && /instagram\\.com\\/(p|reel)\\//.test(recipe.sourceUrl || "");
+          if (isInstagramImportable) {{
+            const importResp = await fetch("/api/import-instagram-url", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{ url: recipe.sourceUrl }}),
+            }});
+            if (importResp.ok) {{
+              const importData = await importResp.json();
+              if (existingId && existingId !== importData.id) {{
+                state.custom = state.custom.filter((r) => r.id !== existingId);
+                state.order = state.order.filter((id) => id !== existingId);
+                grid.querySelector(`[data-recipe-id="${{CSS.escape(existingId)}}"]`)?.remove();
+              }}
+              recipe.id = importData.id;
+              recipe.source = importData.source || recipe.source;
+              recipe.sourceName = importData.sourceName || "";
+              state.overrides[recipe.id] = recipe;
+              if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
+              save(saveStatus);
+              location.reload();
+              return;
+            }}
+          }}
           if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
           else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
           if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
@@ -909,6 +957,36 @@ def render_html(
           grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
           applySourceFilter();
           openDialog().close();
+        }});
+        reimportButton.addEventListener("click", async () => {{
+          const url = sourceUrlInput.value.trim();
+          if (!url) return;
+          reimportButton.disabled = true;
+          saveStatus.textContent = {t.js('reimport_source_loading')};
+          try {{
+            const resp = await fetch("/api/import-instagram-url", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{ url }}),
+            }});
+            if (!resp.ok) throw new Error();
+            const data = await resp.json();
+            const id = idInput.value;
+            const existingRecipe = id ? recipeFromCard(grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)) : {{}};
+            const updated = {{ ...existingRecipe, id: data.id, source: data.source || "unknown", sourceName: data.sourceName || "" }};
+            if (id && id !== data.id) {{
+              state.custom = state.custom.filter((r) => r.id !== id);
+              state.order = state.order.filter((rid) => rid !== id);
+              grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
+            }}
+            state.overrides[data.id] = updated;
+            if (!state.order.includes(data.id)) state.order.push(data.id);
+            save(saveStatus);
+            location.reload();
+          }} catch {{
+            saveStatus.textContent = {t.js('reimport_source_failed')};
+            reimportButton.disabled = false;
+          }}
         }});
       }})();
     </script>

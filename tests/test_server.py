@@ -485,6 +485,74 @@ def test_no_warning_when_the_database_cannot_be_read() -> None:
     assert server.empty_database_warning(sessionmaker(bind=create_engine("sqlite://"))) is None
 
 
+def test_import_by_url_endpoint_returns_shortcode(tmp_path, monkeypatch) -> None:
+    """Regression: POST /api/import-instagram-url must return the imported shortcode."""
+    import json
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from cookbook.database import Base
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(server, "import_post_by_url", lambda root, fac, url: ("Dcnm2wQtTVk", "lizapanelim", "ליזה פאנלים"))
+    handler_type = server.make_handler(tmp_path, factory)
+    handler = object.__new__(handler_type)
+    responses: list[Any] = []
+    handler._json_response = lambda code, body: responses.append((code, body))
+
+    body = json.dumps({"url": "https://www.instagram.com/p/Dcnm2wQtTVk/"}).encode()
+    handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
+    handler.rfile = __import__("io").BytesIO(body)
+    handler.path = "/api/import-instagram-url"
+    handler.do_POST()
+    assert responses.pop() == (200, {"id": "Dcnm2wQtTVk", "source": "lizapanelim", "sourceName": "ליזה פאנלים"})
+    engine.dispose()
+
+
+def test_import_by_url_endpoint_validates_request_body(tmp_path, monkeypatch) -> None:
+    """Regression: the endpoint must reject malformed requests with 400."""
+    import json
+
+    monkeypatch.setattr(server, "import_post_by_url", lambda root, fac, url: ("shortcode", "", ""))
+    handler_type = server.make_handler(tmp_path, None)
+    handler = object.__new__(handler_type)
+    responses: list[Any] = []
+    handler._json_response = lambda code, body: responses.append((code, body))
+
+    def post(body: bytes, content_type: str = "application/json") -> int:
+        handler.headers = {"Content-Length": str(len(body)), "Content-Type": content_type}
+        handler.rfile = __import__("io").BytesIO(body)
+        handler.path = "/api/import-instagram-url"
+        handler.do_POST()
+        return responses.pop()[0]
+
+    assert post(b"not json") == 400
+    assert post(b"{}") == 400
+    assert post(b'{"url": 123}') == 400
+    assert post(b'{"url": "https://www.instagram.com/p/abc/"}', "text/plain") == 400
+
+
+def test_import_by_url_endpoint_returns_503_when_scraper_fails(tmp_path, monkeypatch) -> None:
+    """Regression: a failed scrape must return 503, not a crash."""
+    import json
+
+    monkeypatch.setattr(server, "import_post_by_url", lambda root, fac, url: None)
+    handler_type = server.make_handler(tmp_path, None)
+    handler = object.__new__(handler_type)
+    responses: list[Any] = []
+    handler._json_response = lambda code, body: responses.append((code, body))
+
+    body = json.dumps({"url": "https://www.instagram.com/p/Dcnm2wQtTVk/"}).encode()
+    handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
+    handler.rfile = __import__("io").BytesIO(body)
+    handler.path = "/api/import-instagram-url"
+    handler.do_POST()
+    assert responses.pop()[0] == 503
+
+
 def test_recipe_photo_served_from_database_including_legacy_saved_urls(tmp_path) -> None:
     import threading
     from http.server import ThreadingHTTPServer

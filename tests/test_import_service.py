@@ -206,3 +206,113 @@ def test_run_scraper_returns_the_job_stderr(tmp_path, monkeypatch):
     monkeypatch.setattr(import_service.subprocess, 'Popen', lambda command, **kwargs: Process())
 
     assert import_service.run_scraper(tmp_path) == (4, 'reason text')
+
+
+def test_import_post_by_url_scrapes_and_stores_recipe(tmp_path, monkeypatch):
+    """Regression: manually adding an Instagram URL must create a Recipe+Post in the DB."""
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    fetched_paths = []
+
+    def fake_fetch(media_path, **kwargs):
+        fetched_paths.append(media_path)
+        item = Recipe(id="Dcnm2wQtTVk", image_url="", caption="test", timestamp_utc="2026-01-01")
+        item.post = Post(shortcode="Dcnm2wQtTVk", url="https://www.instagram.com/p/Dcnm2wQtTVk/", typename="GraphImage", is_video=False)
+        return item
+
+    monkeypatch.setattr(post_import_job, "fetch_post_by_url_browser", fake_fetch)
+    monkeypatch.setattr(post_import_job, "store_missing_photos", lambda f, r: None)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+
+    result = post_import_job.import_post_by_url(
+        tmp_path, factory, "https://www.instagram.com/p/Dcnm2wQtTVk/"
+    )
+
+    assert result is not None
+    shortcode, source, _name = result
+    assert shortcode == "Dcnm2wQtTVk"
+    assert fetched_paths == ["/p/Dcnm2wQtTVk/"]
+    assert {r.id for r in load_recipes(factory, False)} == {"Dcnm2wQtTVk"}
+    engine.dispose()
+
+
+def test_import_post_by_url_supports_reel_urls(tmp_path, monkeypatch):
+    """Regression: reel URLs must extract /reel/ media path, not /p/."""
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    fetched_paths = []
+
+    def fake_fetch(media_path, **kwargs):
+        fetched_paths.append(media_path)
+        item = Recipe(id="DMTxeG4J0H3", image_url="", caption="", timestamp_utc="2026-01-01")
+        item.post = Post(shortcode="DMTxeG4J0H3", url="https://www.instagram.com/reel/DMTxeG4J0H3/", typename="GraphVideo", is_video=True)
+        return item
+
+    monkeypatch.setattr(post_import_job, "fetch_post_by_url_browser", fake_fetch)
+    monkeypatch.setattr(post_import_job, "store_missing_photos", lambda f, r: None)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+
+    result = post_import_job.import_post_by_url(
+        tmp_path, factory, "https://www.instagram.com/reel/DMTxeG4J0H3/"
+    )
+
+    assert result is not None
+    shortcode, _, __ = result
+    assert shortcode == "DMTxeG4J0H3"
+    assert fetched_paths == ["/reel/DMTxeG4J0H3/"]
+    engine.dispose()
+
+
+def test_import_post_by_url_includes_extracted_instagram_username(tmp_path, monkeypatch):
+    """Regression: source must come from the scraped page, not be hardcoded."""
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    def fake_fetch(media_path, **kwargs):
+        item = Recipe(id="Dcnm2wQtTVk", image_url="", caption="", timestamp_utc="2026-01-01")
+        item.post = Post(shortcode="Dcnm2wQtTVk", url="https://www.instagram.com/p/Dcnm2wQtTVk/", typename="GraphImage", is_video=False)
+        item._instagram_username = "lizapanelim"
+        return item
+
+    monkeypatch.setattr(post_import_job, "fetch_post_by_url_browser", fake_fetch)
+    monkeypatch.setattr(post_import_job, "store_missing_photos", lambda f, r: None)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+
+    result = post_import_job.import_post_by_url(
+        tmp_path, factory, "https://www.instagram.com/p/Dcnm2wQtTVk/"
+    )
+
+    assert result[:2] == ("Dcnm2wQtTVk", "lizapanelim")
+    engine.dispose()
+
+
+def test_import_post_by_url_returns_none_for_non_instagram_url(tmp_path, monkeypatch):
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+    assert post_import_job.import_post_by_url(tmp_path, factory, "https://example.com/recipe") is None
+    engine.dispose()
+
+
+def test_import_post_by_url_returns_none_when_scraper_fails(tmp_path, monkeypatch):
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(post_import_job, "fetch_post_by_url_browser", lambda *args, **kwargs: None)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+    result = post_import_job.import_post_by_url(
+        tmp_path, factory, "https://www.instagram.com/reel/DMTxeG4J0H3/"
+    )
+    assert result is None
+    engine.dispose()

@@ -28,6 +28,7 @@ from .config import load_config
 from .database import create_session_factory
 from .import_service import ImportService
 from .models import Recipe, RecipeState
+from .post_import_job import import_post_by_url
 from .post_repository import load_recipes, mark_not_recipe
 from .recipe_image_repository import load_recipe_image
 from .recipe_page_repository import load_recipe_page
@@ -501,6 +502,31 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     return
                 started = imports.start()
                 self._json_response(202 if started else 409, imports.status())
+                return
+            if urlsplit(self.path).path == "/api/import-instagram-url":
+                try:
+                    if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                        raise ValueError
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 10_000:
+                        raise ValueError
+                    body = json.loads(self.rfile.read(length))
+                    if not isinstance(body, dict) or "url" not in body or not isinstance(body["url"], str):
+                        raise ValueError
+                    url = body["url"].strip()
+                except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                    self._json_response(400, {"error": "Expected a JSON object with a url"})
+                    return
+                result = import_post_by_url(root, factory, url)
+                if result is None:
+                    self._json_response(503, {"error": "Failed to import post from Instagram"})
+                    return
+                shortcode, source, source_name = result
+                try:
+                    imports.refresh()
+                except (SQLAlchemyError, OSError, TypeError, ValueError):
+                    pass
+                self._json_response(200, {"id": shortcode, "source": source, "sourceName": source_name})
                 return
             if urlsplit(self.path).path != "/api/trello/cards":
                 self._json_response(404, {"error": "Not found"})
