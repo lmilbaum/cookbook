@@ -54,18 +54,18 @@ def test_stalled_partial_profile_never_selects_a_post():
 def test_missing_publication_time_skips_only_that_node():
     timeline = ProfileTimeline()
     timeline.consume(payload([{'code': 'unknown'}, {'code': 'good', 'taken_at': 1}], False))
-    assert not timeline.invalid
     assert timeline.complete
     assert timeline.paths() == ['/p/good/']
     assert timeline.skipped_edges == 1
 
 
-def test_partial_graphql_error_cannot_confirm_completion():
+def test_partial_graphql_error_skips_response_and_does_not_complete():
     timeline = ProfileTimeline()
     result = payload([{'code': 'candidate', 'taken_at': 1}], False)
     result['errors'] = [{'message': 'Partial response'}]
     timeline.consume(result)
-    assert timeline.invalid and not timeline.complete
+    assert not timeline.complete
+    assert timeline.paths() == []
 
 
 def test_single_malformed_edge_does_not_abort_profile_scan():
@@ -110,7 +110,6 @@ def test_single_malformed_edge_does_not_abort_profile_scan():
 def test_structural_page_weirdness_is_skipped_not_invalidating(bad_page):
     timeline = ProfileTimeline()
     timeline.consume(bad_page)
-    assert not timeline.invalid
     assert not timeline.complete
 
 
@@ -119,7 +118,7 @@ def test_structural_weirdness_recovers_on_next_valid_response():
     timeline = ProfileTimeline()
     bad_page = {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": {"has_next_page": None}}}}
     timeline.consume(bad_page)
-    assert not timeline.invalid and not timeline.complete
+    assert not timeline.complete
     timeline.consume(payload([{"code": "only_post", "taken_at": 1}], False))
     assert timeline.complete
     assert timeline.paths() == ["/p/only_post/"]

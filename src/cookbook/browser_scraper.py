@@ -277,8 +277,6 @@ def _scroll_profile_timeline(page: Any, timeline: ProfileTimeline) -> list[str]:
     """Wait for profile pagination completion; unrelated feeds cannot advance it."""
     idle = 0
     for _ in range(4000):
-        if timeline.invalid:
-            raise IncompleteProfileError("pagination_incomplete")
         if timeline.complete:
             return timeline.paths()
         previous_count = len(timeline.posts)

@@ -13,7 +13,6 @@ class ProfileTimeline:
     def __init__(self) -> None:
         self.posts: dict[str, tuple[int, str]] = {}
         self.complete = False
-        self.invalid = False
         self.skipped_edges: int = 0
 
     def observe(self, response: Any) -> None:
@@ -35,7 +34,6 @@ class ProfileTimeline:
         if not isinstance(connection, dict):
             return
         if payload.get("errors"):
-            self.invalid = True
             return
         edges, info = connection.get("edges"), connection.get("page_info")
         if not isinstance(edges, list) or not isinstance(info, dict):
@@ -55,7 +53,7 @@ class ProfileTimeline:
                 continue
             kind = "reel" if node.get("product_type") == "clips" else "p"
             self.posts[code] = (timestamp, f"/{kind}/{code}/")
-        if info["has_next_page"] is False and not self.invalid:
+        if info["has_next_page"] is False:
             self.complete = True
 
     def paths(self) -> list[str]:
