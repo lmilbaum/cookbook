@@ -21,7 +21,7 @@ def download_photo(recipe: Recipe) -> tuple[bytes, str] | None:
     image_url = recipe.image_url.strip()
     suffix = Path(urlsplit(image_url).path).suffix.lower()
     content_type = PHOTO_CONTENT_TYPES.get(suffix, "image/jpeg")
-    candidate_urls = [image_url]
+    candidate_urls = [image_url] if image_url.startswith("http") else []
     if recipe.post is not None:
         path_type = "reel" if recipe.post.is_video else "p"
         candidate_urls += [
@@ -64,7 +64,7 @@ def store_missing_photos(factory: sessionmaker[Session], recipes: Iterable[Recip
             if insert_recipe_photo(factory, recipe.id, photo_ct, photo_bytes):
                 count += 1
             continue
-        if not recipe.image_url.strip().startswith("http"):
+        if not recipe.image_url.strip().startswith("http") and recipe.post is None:
             continue
         photo = download_photo(recipe)
         if photo is not None and insert_recipe_photo(factory, recipe.id, photo[1], photo[0]):

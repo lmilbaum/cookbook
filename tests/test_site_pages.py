@@ -332,3 +332,11 @@ def test_recipe_save_feedback_is_local_and_temporary() -> None:
     assert 'if (!await saved) return' in cookbook
     assert 'grid.append(createCard(recipesById.get(id))));\n        save();' not in cookbook
     assert 'save(status)' in notes
+
+
+def test_empty_image_override_does_not_hide_stored_photo() -> None:
+    recipe = make_recipe(image_url="recipes/photos/r1")
+    document = render_html([recipe], "favicon.svg")
+
+    # Verify the fallback logic is in place: image override that is empty should fall back to recipe's stored URL
+    assert "imageUrl: state.overrides[recipe.id]?.imageUrl || recipe.imageUrl" in document

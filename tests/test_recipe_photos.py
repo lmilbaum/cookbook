@@ -37,6 +37,12 @@ def _recipe(code: str, image_url: str = "https://cdn.example/x.jpg") -> Recipe:
     return recipe
 
 
+def _reel(code: str, image_url: str = "https://cdn.example/x.jpg") -> Recipe:
+    recipe = Recipe(id=code, image_url=image_url, caption="", timestamp_utc="2026-01-01")
+    recipe.post = Post(shortcode=code, url="https://example.com", typename="GraphVideo", is_video=True)
+    return recipe
+
+
 def test_photo_is_stored_once_and_never_replaced(factory) -> None:
     assert insert_recipe_photo(factory, "a", "image/jpeg", b"first")
     assert not insert_recipe_photo(factory, "a", "image/png", b"second")
@@ -54,11 +60,56 @@ def test_only_recipes_without_a_photo_are_downloaded(factory, monkeypatch) -> No
         return (b"fresh", "image/jpeg") if recipe.id != "broken" else None
 
     monkeypatch.setattr(recipe_photo_fetch, "download_photo", download)
-    recipes = [_recipe("stored"), _recipe("new"), _recipe("broken"), _recipe("local", image_url="")]
+    # "local" has empty image_url and no post, so it should be skipped (not downloaded)
+    local_recipe = _recipe("local", image_url="")
+    local_recipe.post = None
+    recipes = [_recipe("stored"), _recipe("new"), _recipe("broken"), local_recipe]
     assert recipe_photo_fetch.store_missing_photos(factory, recipes) == 1
     assert downloaded == ["new", "broken"]
     assert photo_ids(factory) == {"stored", "new"}
     assert load_recipe_photo(factory, "stored") == (b"kept", "image/jpeg")
+
+
+def test_recipe_with_post_but_empty_image_url_is_still_downloaded(factory, monkeypatch) -> None:
+    downloaded = []
+
+    def download(recipe):
+        downloaded.append(recipe.id)
+        return (b"image", "image/jpeg")
+
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", download)
+    # Reel with empty image_url but a valid post should still be downloaded (via post media URLs)
+    reel = _reel("reel-empty", image_url="")
+    assert recipe_photo_fetch.store_missing_photos(factory, [reel]) == 1
+    assert downloaded == ["reel-empty"]
+    assert photo_ids(factory) == {"reel-empty"}
+
+
+def test_download_with_empty_image_url_tries_only_shortcode_endpoints(monkeypatch) -> None:
+    requested = []
+
+    class Response:
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def read(self) -> bytes: return self.body
+
+    def urlopen(request, timeout):
+        requested.append(request.full_url)
+        if "media" in request.full_url:
+            return Response(b"image")
+        raise OSError("expired")
+
+    monkeypatch.setattr(recipe_photo_fetch, "urlopen", urlopen)
+    # Empty image_url should skip the URL and only try shortcode endpoints
+    recipe = _recipe("test", image_url="")
+    result = recipe_photo_fetch.download_photo(recipe)
+    assert result == (b"image", "image/jpeg")
+    # Should not have tried to fetch the empty string
+    assert "" not in requested
+    # Should have tried the media endpoints
+    assert any("media" in url for url in requested)
 
 
 def test_download_falls_back_to_instagram_media_endpoint(monkeypatch) -> None:
@@ -131,12 +182,6 @@ def test_import_command_loads_existing_asset_files_and_keeps_them(factory, tmp_p
     assert load_recipe_photo(factory, "other") == (b"database copy wins", "image/png")
     assert "Imported 1 of 2" in capsys.readouterr().out
     assert sorted(path.name for path in assets.iterdir()) == ["BCP_gsMu-WY.jpg", "notes.txt", "other.png"]
-
-
-def _reel(code: str, image_url: str = "https://cdn.example/x.jpg") -> Recipe:
-    recipe = Recipe(id=code, image_url=image_url, caption="", timestamp_utc="2026-01-01")
-    recipe.post = Post(shortcode=code, url="https://example.com", typename="GraphVideo", is_video=True)
-    return recipe
 
 
 def test_reel_photo_bytes_are_stored_directly_without_url_download(factory, monkeypatch) -> None:
