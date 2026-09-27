@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import session_scope
-from .models import RecipeState
+from .models import Recipe, RecipeState
 
 
 class RecipeStateConflict(ValueError):
@@ -70,6 +70,29 @@ def save_recipe_state(factory: sessionmaker[Session], state: dict[str, Any], rev
 
     if not valid_state(state) or type(revision) is not int or revision < 0:
         raise ValueError("Invalid recipe state")
+
+    # Migration shim: promote old-format saves with state.custom to new format
+    custom = state.get("custom", [])
+    if custom:
+        from .post_repository import create_custom_recipe
+        with session_scope(factory) as session:
+            for custom_recipe in custom:
+                recipe_id = custom_recipe.get("id")
+                if not recipe_id:
+                    continue
+                # Only insert if the recipe doesn't already exist
+                if session.get(Recipe, recipe_id) is None:
+                    # Create and insert the custom recipe
+                    new_recipe = create_custom_recipe(custom_recipe.get("title", ""))
+                    new_recipe.id = recipe_id
+                    new_recipe.image_url = custom_recipe.get("imageUrl", "")
+                    new_recipe.source = custom_recipe.get("source", "unknown")
+                    new_recipe.source_name = custom_recipe.get("sourceName", "")
+                    session.add(new_recipe)
+                # Move to overrides
+                state.setdefault("overrides", {})[recipe_id] = custom_recipe
+        state["custom"] = []
+
     with session_scope(factory) as session:
         if session.get_bind().dialect.name == "postgresql":
             session.execute(text("LOCK TABLE recipe_states IN EXCLUSIVE MODE"))

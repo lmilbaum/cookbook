@@ -51,9 +51,15 @@ _RECIPE_STATE_SCRIPT = r"""
         const backupKey = `${storageKey}-backup-${Date.now()}`;
         const persistSnapshot = async (snapshot) => {
           if (blocked) throw new Error(@@recipes_reload_blocked@@);
+          // Filter out added_via from all recipes in overrides before sending
+          const cleanSnapshot = { ...snapshot, overrides: {} };
+          for (const [id, recipe] of Object.entries(snapshot.overrides)) {
+            const { added_via, ...cleaned } = recipe;
+            cleanSnapshot.overrides[id] = cleaned;
+          }
           const response = await fetch("/api/recipe-state", {
             method: "PUT", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ state: snapshot, revision }),
+            body: JSON.stringify({ state: cleanSnapshot, revision }),
           });
           if (!response.ok) {
             blocked = true;
@@ -232,6 +238,7 @@ def render_html(
                 "instructions": "",
                 "prerequisiteId": "",
                 "notes": "",
+                "added_via": recipe.added_via,
             }
         )
 
@@ -257,6 +264,15 @@ def render_html(
         f'<textarea dir="auto" aria-label="{t.html("recipe_notes")}"></textarea>'
         '<p class="recipe-notes-status" aria-live="polite"></p></section>'
         f'<button class="edit-recipe" type="button">{t.html("edit_recipe")}</button>'
+        f'<section class="recipe-made-dates" hidden>'
+        f'<h3>{t.html("made_dates")}</h3>'
+        f'<div class="made-dates-input">'
+        f'<input type="date" class="made-dates-date-input" aria-label="{t.html("made_date_input")}" />'
+        f'<button type="button" class="mark-made" aria-label="{t.html("mark_made")}">{t.html("mark_made")}</button>'
+        f'</div>'
+        f'<p class="made-dates-status" aria-live="polite"></p>'
+        f'<ol class="made-dates-list" role="list"></ol>'
+        f'</section>'
         '<div class="card-image"></div>'
     )
 
@@ -324,6 +340,7 @@ def render_html(
       .grid .recipe-ingredients,
       .grid .recipe-instructions,
       .grid .recipe-notes,
+      .grid .recipe-made-dates,
       .grid .edit-recipe {{ display: none; }}
       .grid .card-header {{ margin-bottom: 12px; }}
       .grid .card-image img {{ margin: 0; }}
@@ -337,6 +354,18 @@ def render_html(
       .recipe-notes h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-notes textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #171a21; color: #eceef3; font: inherit; }}
       .recipe-notes-status {{ min-height: 1.25em; margin: 6px 0 0; color: #92d3a2; font-size: .85rem; }}
+      .recipe-made-dates {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
+      .recipe-made-dates h3 {{ margin: 0 0 8px; font-size: 1rem; }}
+      .made-dates-input {{ display: flex; gap: 8px; margin-bottom: 8px; }}
+      .made-dates-date-input {{ flex: 1; padding: 8px 10px; border: 1px solid #3a414f; border-radius: 6px; background: #171a21; color: #eceef3; font: inherit; }}
+      .mark-made {{ padding: 8px 12px; background: #8db7ff; color: #101218; font-weight: 600; border-radius: 6px; border: 0; cursor: pointer; }}
+      .mark-made:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+      .made-dates-status {{ min-height: 1.25em; margin: 0 0 8px; color: #92d3a2; font-size: .85rem; }}
+      .made-dates-list {{ list-style: none; padding: 0; margin: 0; }}
+      .made-dates-list li {{ display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #3a414f; }}
+      .made-dates-list li:last-child {{ border-bottom: 0; }}
+      .remove-made-date {{ padding: 4px 8px; background: transparent; color: #8db7ff; border: 0; cursor: pointer; font-weight: 600; }}
+      .remove-made-date:hover {{ color: #a8c8ff; }}
       .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
       .recipe-instructions h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-instructions pre {{ margin: 0; }}
@@ -546,8 +575,7 @@ def render_html(
           const card = id && grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`);
           if (!card) return;
           const recipe = {{ ...recipeFromCard(card), type: name }};
-          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
-          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
+          state.overrides[recipe.id] = recipe;
           save(saveStatus); updateCard(card, recipe);
         }};
         const openTypeList = () => {{ typeActive = -1; renderTypeList(); }};
@@ -582,6 +610,7 @@ def render_html(
         const saveStatus = document.getElementById("save-status");
         const selectedRecipeId = new URLSearchParams(window.location.search).get("recipe");
         const baseIds = new Set(baseRecipes.map((recipe) => recipe.id));
+        const isCustom = (recipe) => recipe.added_via === "custom";
         let state;
         try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
         catch {{ state = {{ overrides: {{}}, custom: [] }}; }}
@@ -597,12 +626,11 @@ def render_html(
         }}
         const allRecipes = () => baseRecipes
           .map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}), recipeName: state.overrides[recipe.id]?.recipeName || recipe.recipeName }}))
-          .concat(state.custom);
         const availableIds = new Set(allRecipes().map((recipe) => recipe.id));
         if (!Array.isArray(state.order)) {{
           const baseOrder = baseRecipes.map((recipe) => recipe.id);
           const newestBaseId = baseOrder.pop();
-          state.order = [...baseOrder, ...state.custom.map((recipe) => recipe.id)];
+          state.order = [...baseOrder];
           if (newestBaseId) state.order.push(newestBaseId);
         }}
         state.order = state.order.filter((id) => availableIds.has(id));
@@ -610,9 +638,10 @@ def render_html(
 
         // Source data owns the order of imported recipes. Preserve browser-only
         // recipes in their existing slots when the source order changes.
-        const sourceOrder = baseRecipes.map((recipe) => recipe.id);
+        const sourceOrder = baseRecipes.filter((recipe) => !isCustom(recipe)).map((recipe) => recipe.id);
         let sourceIndex = 0;
-        state.order = state.order.map((id) => baseIds.has(id) ? sourceOrder[sourceIndex++] : id);
+        const mapSourceOrder = (id) => {{ const r = baseRecipes.find((x) => x.id === id); return r && !isCustom(r) ? sourceOrder[sourceIndex++] : id; }};
+        state.order = state.order.map(mapSourceOrder);
 
         const safeLink = (value) => {{
           if (!value) return "";
@@ -738,15 +767,15 @@ def render_html(
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
         const gridCard = (id) => grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`);
         const openDialog = () => recipePage.open ? recipePage : dialog;
-        const openEditor = (recipe, isCustom, inline = false) => {{
+        const openEditor = (recipe, isCustomRecipe, inline = false) => {{
           form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; typeInput.value = recipeType(recipe); closeTypeList(); recipeUrlInput.value = recipe.recipeUrl || "";
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
           ingredientsEditorBody.replaceChildren();
           const ingredients = normalizeIngredients(recipe.ingredients);
           (ingredients.length ? ingredients : [{{}}]).forEach(addIngredientRow);
           instructionsInput.value = recipe.instructions || "";
-          formTitle.textContent = recipe.id ? {t.js('edit_recipe')} : {t.js('add_recipe_title')}; deleteButton.hidden = !isCustom;
-          notRecipeButton.hidden = isCustom || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
+          formTitle.textContent = recipe.id ? {t.js('edit_recipe')} : {t.js('add_recipe_title')}; deleteButton.hidden = !isCustomRecipe;
+          notRecipeButton.hidden = isCustomRecipe || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
           reimportButton.hidden = !/instagram\\.com\\/(p|reel)\\//.test(recipe.sourceUrl || "");
           if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
@@ -800,13 +829,92 @@ def render_html(
         applySourceFilter();
         // Recipes open in a popup over the home page; the grid card stays the source of truth.
         let pushedRecipeUrl = false;
+        const localToday = () => {{
+          const d = new Date();
+          return `${{d.getFullYear()}}-${{String(d.getMonth() + 1).padStart(2, "0")}}-${{String(d.getDate()).padStart(2, "0")}}`;
+        }};
+        const formatMadeDate = (isoDate) => {{
+          const date = new Date(isoDate + "T00:00:00");
+          const formatter = new Intl.DateTimeFormat({t.lang_js}, {{ dateStyle: "long" }});
+          return formatter.format(date);
+        }};
+        const renderMadeDates = async (card, recipeId) => {{
+          const section = card.querySelector(".recipe-made-dates");
+          const list = section.querySelector(".made-dates-list");
+          const status = section.querySelector(".made-dates-status");
+          list.replaceChildren();
+          status.textContent = "";
+          try {{
+            const resp = await fetch(`/api/recipes/${{encodeURIComponent(recipeId)}}/made-dates`);
+            if (!resp.ok) throw new Error();
+            const data = await resp.json();
+            if (!data.dates.length) {{
+              const item = document.createElement("li");
+              item.textContent = {t.js('made_never')};
+              list.append(item);
+              return;
+            }}
+            data.dates.forEach((date) => {{
+              const item = document.createElement("li");
+              const timeEl = document.createElement("time");
+              timeEl.dateTime = date;
+              timeEl.textContent = formatMadeDate(date);
+              const removeBtn = document.createElement("button");
+              removeBtn.type = "button";
+              removeBtn.className = "remove-made-date";
+              removeBtn.textContent = "−";
+              removeBtn.setAttribute("aria-label", fmt({t.js('remove_made_date')}, {{ date: formatMadeDate(date) }}));
+              removeBtn.addEventListener("click", async () => {{
+                try {{
+                  const delResp = await fetch(`/api/recipes/${{encodeURIComponent(recipeId)}}/made-dates/${{date}}`, {{ method: "DELETE" }});
+                  if (!delResp.ok) throw new Error();
+                  await renderMadeDates(card, recipeId);
+                }} catch {{
+                  status.textContent = {t.js('made_dates_save_failed')};
+                }}
+              }});
+              item.append(timeEl, removeBtn);
+              list.append(item);
+            }});
+          }} catch {{
+            status.textContent = {t.js('made_dates_load_failed')};
+          }}
+        }};
         const showRecipe = (id, updateUrl = true) => {{
           const selectedCard = gridCard(id); if (!selectedCard) return;
           const recipe = recipeFromCard(selectedCard);
           const card = createCard(recipe); card.removeAttribute("id");
           card.append(form);
           recipePageCard.replaceChildren(card);
-          openEditor(recipe, !baseIds.has(id), true);
+          openEditor(recipe, isCustom(recipe), true);
+          const madeSection = card.querySelector(".recipe-made-dates");
+          madeSection.hidden = !hosted;
+          if (hosted) {{
+            renderMadeDates(card, id);
+            const dateInput = madeSection.querySelector(".made-dates-date-input");
+            dateInput.max = localToday();
+            const markBtn = madeSection.querySelector(".mark-made");
+            const status = madeSection.querySelector(".made-dates-status");
+            markBtn.addEventListener("click", async () => {{
+              const date = dateInput.value.trim();
+              if (!date) return;
+              markBtn.disabled = true;
+              try {{
+                const resp = await fetch(`/api/recipes/${{encodeURIComponent(id)}}/made-dates`, {{
+                  method: "POST",
+                  headers: {{ "Content-Type": "application/json" }},
+                  body: JSON.stringify({{ date }})
+                }});
+                if (!resp.ok) throw new Error();
+                dateInput.value = "";
+                await renderMadeDates(card, id);
+              }} catch {{
+                status.textContent = {t.js('made_dates_save_failed')};
+              }} finally {{
+                markBtn.disabled = false;
+              }}
+            }});
+          }}
           if (updateUrl) {{
             const url = `index.html?recipe=${{encodeURIComponent(id)}}`;
             if (recipePage.open) history.replaceState({{ recipe: id }}, "", url);
@@ -842,7 +950,10 @@ def render_html(
           requestAnimationFrame(restoreScroll);
           window.addEventListener("load", restoreScroll, {{ once: true }});
         }}
-        document.getElementById("add-recipe").addEventListener("click", () => openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown" }}, true));
+        document.getElementById("add-recipe").addEventListener("click", () => {{
+          if (!hosted) return;
+          openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown", added_via: "custom" }}, true);
+        }});
         document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
         document.getElementById("cancel-recipe").addEventListener("click", () => openDialog().close());
         recipePageCard.addEventListener("input", (event) => {{
@@ -850,38 +961,60 @@ def render_html(
           const card = notes.closest("[data-recipe-id]");
           const recipe = {{ ...recipeFromCard(gridCard(card.dataset.recipeId)), notes: notes.value }};
           card.dataset.recipe = gridCard(recipe.id).dataset.recipe = JSON.stringify(recipe);
-          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
-          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
+          state.overrides[recipe.id] = recipe;
           save(card.querySelector(".recipe-notes-status"));
         }});
         recipePageCard.addEventListener("change", (event) => {{
           const select = event.target.closest(".recipe-prerequisite select"); if (!select) return;
           const card = select.closest("[data-recipe-id]");
           const recipe = {{ ...recipeFromCard(gridCard(card.dataset.recipeId)), prerequisiteId: select.value }};
-          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
-          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; }}
+          state.overrides[recipe.id] = recipe;
           save(card.querySelector(".prerequisite-status")); updateCard(gridCard(recipe.id), recipe); updateCard(card, recipe);
         }});
         grid.addEventListener("click", (event) => {{
           const button = event.target.closest(".edit-recipe"); if (!button) return;
-          const card = button.closest("[data-recipe-id]"); openEditor(recipeFromCard(card), !baseIds.has(card.dataset.recipeId));
+          const card = button.closest("[data-recipe-id]");
+          const recipe = recipeFromCard(card);
+          openEditor(recipe, isCustom(recipe));
         }});
         form.addEventListener("submit", async (event) => {{
           event.preventDefault();
           const existingId = idInput.value;
-          const previous = existingId ? recipeFromCard(grid.querySelector(`[data-recipe-id="${{CSS.escape(existingId)}}"]`)) : {{}};
+          const existingCard = existingId ? grid.querySelector(`[data-recipe-id="${{CSS.escape(existingId)}}"]`) : null;
+          const previous = existingCard ? recipeFromCard(existingCard) : {{}};
           const title = titleInput.value.trim();
           const recipeUrl = safeLink(recipeUrlInput.value.trim());
           const extraRecipeLinks = (previous.recipeUrls || [])
             .map((url, index) => ({{ url, name: (previous.recipeNames || [])[index] || recipeNameFromUrl(url) }}))
             .filter((link) => link.url !== previous.recipeUrl && link.url !== recipeUrl);
-          const isCustomRecipe = !existingId || !baseIds.has(existingId);
-          const recipeName = isCustomRecipe
+          const isEditingCustom = existingId && isCustom(previous);
+          const recipeName = !existingId || isEditingCustom
             ? title
             : recipeUrl === previous.recipeUrl ? previous.recipeName || "" : recipeNameFromUrl(recipeUrl);
+
+          let recipeId = existingId;
+          if (!existingId && hosted) {{
+            try {{
+              const createResp = await fetch("/api/recipes", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ title }})
+              }});
+              if (!createResp.ok) {{
+                saveStatus.textContent = {t.js('recipes_save_failed')};
+                return;
+              }}
+              const createData = await createResp.json();
+              recipeId = createData.id;
+            }} catch {{
+              saveStatus.textContent = {t.js('recipes_save_failed')};
+              return;
+            }}
+          }}
+
           const recipe = {{
             ...previous,
-            id: existingId || `custom-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`,
+            id: recipeId || `custom-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`,
             title,
             recipeUrl,
             recipeName,
@@ -897,23 +1030,19 @@ def render_html(
             prerequisiteId: previous.prerequisiteId || "",
             notes: previous.notes || "",
             source: previous.source || "unknown",
+            added_via: previous.added_via || "custom",
           }};
           if (!recipe.title) return;
           await addTypeName(recipe.type);
-          const isInstagramImportable = !baseIds.has(existingId) && /instagram\\.com\\/(p|reel)\\//.test(recipe.sourceUrl || "");
+          const isInstagramImportable = isEditingCustom && /instagram\\.com\\/(p|reel)\\//.test(recipe.sourceUrl || "");
           if (isInstagramImportable) {{
             const importResp = await fetch("/api/import-instagram-url", {{
               method: "POST",
               headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify({{ url: recipe.sourceUrl }}),
+              body: JSON.stringify({{ url: recipe.sourceUrl, replaces: existingId }}),
             }});
             if (importResp.ok) {{
               const importData = await importResp.json();
-              if (existingId && existingId !== importData.id) {{
-                state.custom = state.custom.filter((r) => r.id !== existingId);
-                state.order = state.order.filter((id) => id !== existingId);
-                grid.querySelector(`[data-recipe-id="${{CSS.escape(existingId)}}"]`)?.remove();
-              }}
               recipe.id = importData.id;
               recipe.source = importData.source || recipe.source;
               recipe.sourceName = importData.sourceName || "";
@@ -924,8 +1053,7 @@ def render_html(
               return;
             }}
           }}
-          if (baseIds.has(recipe.id)) state.overrides[recipe.id] = recipe;
-          else {{ const index = state.custom.findIndex((item) => item.id === recipe.id); if (index >= 0) state.custom[index] = recipe; else state.custom.push(recipe); }}
+          state.overrides[recipe.id] = recipe;
           if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
           const saved = save(saveStatus); const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(recipe.id)}}"]`); if (card) updateCard(card, recipe); else grid.append(createCard(recipe));
           grid.querySelectorAll("[data-recipe-id]").forEach((recipeCard) => updateCard(recipeCard, recipeFromCard(recipeCard)));
@@ -935,9 +1063,26 @@ def render_html(
           setTimeout(() => container.close(), 350);
         }});
         deleteButton.addEventListener("click", async () => {{
-          const id = idInput.value; if (!id || baseIds.has(id)) return;
-          state.custom = state.custom.filter((recipe) => recipe.id !== id); state.order = state.order.filter((recipeId) => recipeId !== id); if (!await save(saveStatus)) return; grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
-          grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
+          const id = idInput.value; if (!id) return;
+          const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`);
+          const recipe = card ? recipeFromCard(card) : {{}};
+          if (!isCustom(recipe)) return;
+          deleteButton.disabled = true;
+          if (hosted) {{
+            try {{
+              const resp = await fetch(`/api/recipes/${{encodeURIComponent(id)}}`, {{ method: "DELETE" }});
+              if (!resp.ok) throw new Error();
+            }} catch {{
+              saveStatus.textContent = {t.js('recipes_save_failed')};
+              deleteButton.disabled = false;
+              return;
+            }}
+          }}
+          delete state.overrides[id];
+          state.order = state.order.filter((recipeId) => recipeId !== id);
+          save(saveStatus);
+          grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
+          grid.querySelectorAll("[data-recipe-id]").forEach((c) => updateCard(c, recipeFromCard(c)));
           applySourceFilter();
           openDialog().close();
         }});
@@ -964,21 +1109,21 @@ def render_html(
           reimportButton.disabled = true;
           saveStatus.textContent = {t.js('reimport_source_loading')};
           try {{
+            const id = idInput.value;
+            const body = {{ url }};
+            const card = id ? grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`) : null;
+            if (card && isCustom(recipeFromCard(card))) {{
+              body.replaces = id;
+            }}
             const resp = await fetch("/api/import-instagram-url", {{
               method: "POST",
               headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify({{ url }}),
+              body: JSON.stringify(body),
             }});
             if (!resp.ok) throw new Error();
             const data = await resp.json();
-            const id = idInput.value;
             const existingRecipe = id ? recipeFromCard(grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)) : {{}};
             const updated = {{ ...existingRecipe, id: data.id, source: data.source || "unknown", sourceName: data.sourceName || "" }};
-            if (id && id !== data.id) {{
-              state.custom = state.custom.filter((r) => r.id !== id);
-              state.order = state.order.filter((rid) => rid !== id);
-              grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)?.remove();
-            }}
             state.overrides[data.id] = updated;
             if (!state.order.includes(data.id)) state.order.push(data.id);
             save(saveStatus);
@@ -1052,7 +1197,7 @@ def render_notes_html(recipes: list[Recipe], favicon_href: str, locale: str = DE
         state.overrides ||= {{}};
         state.custom ||= [];
         {t.fill(_RECIPE_STATE_SCRIPT)}
-        const recipes = baseRecipes.map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}) }})).concat(state.custom);
+        const recipes = baseRecipes.map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}) }}));
         const grid = document.getElementById("notes-grid");
         const recipeId = new URLSearchParams(window.location.search).get("id");
         const recipe = recipes.find((candidate) => candidate.id === recipeId);
@@ -1071,9 +1216,7 @@ def render_notes_html(recipes: list[Recipe], favicon_href: str, locale: str = DE
           const status = document.createElement("p"); status.className = "status"; status.setAttribute("aria-live", "polite");
           input.addEventListener("input", () => {{
             recipe.notes = input.value;
-            const customIndex = state.custom.findIndex((item) => item.id === recipe.id);
-            if (customIndex >= 0) state.custom[customIndex] = {{ ...state.custom[customIndex], notes: recipe.notes }};
-            else state.overrides[recipe.id] = {{ ...recipe }};
+            state.overrides[recipe.id] = {{ ...recipe }};
             save(status);
           }});
           card.append(title, input, status); grid.append(card);

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+import time
 from collections.abc import Iterable
 from urllib.parse import urlsplit
 
@@ -9,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, contains_eager, sessionmaker
 
 from .database import session_scope
-from .models import Post, Recipe
+from .models import Post, Recipe, RecipeMadeDate
 
 LIZAPANELIM_HOST = "lizapanelim.com"
 
@@ -69,6 +71,7 @@ def insert_missing_recipes(
             if session.get(Recipe, recipe.id) is not None:
                 continue
             recipe.source = classify_source(recipe)
+            recipe.added_via = "instagram" if recipe.post else "website"
             session.add(recipe)
             inserted += 1
     return inserted
@@ -86,3 +89,41 @@ def mark_not_recipe(factory: sessionmaker[Session], shortcode: str) -> bool:
         if recipe is not None:
             session.delete(recipe)
     return True
+
+
+def create_custom_recipe(title: str) -> Recipe:
+    """Create a new custom recipe and return it (unsaved)."""
+    recipe_id = f"custom-{int(time.time() * 1000)}-{secrets.token_hex(8)}"
+    return Recipe(
+        id=recipe_id,
+        image_url="",
+        caption="",
+        timestamp_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        title=title,
+        recipe_url="",
+        recipe_name="",
+        source="unknown",
+        source_name="",
+        added_via="custom",
+    )
+
+
+def delete_custom_recipe(factory: sessionmaker[Session], recipe_id: str) -> bool:
+    """Delete a custom recipe. Returns True if it existed and was deleted."""
+    with session_scope(factory) as session:
+        recipe = session.get(Recipe, recipe_id)
+        if recipe is None or recipe.added_via != "custom":
+            return False
+        session.delete(recipe)
+        return True
+
+
+def replace_custom_with_import(factory: sessionmaker[Session], old_id: str, new_recipe_id: str) -> None:
+    """Move all made-dates from old_id to new_recipe_id (on conflict, drop old), then delete the custom recipe."""
+    from .made_date_repository import move_made_dates
+
+    with session_scope(factory) as session:
+        move_made_dates(session, old_id, new_recipe_id)
+        recipe = session.get(Recipe, old_id)
+        if recipe is not None:
+            session.delete(recipe)

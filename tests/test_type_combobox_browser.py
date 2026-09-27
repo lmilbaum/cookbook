@@ -41,7 +41,7 @@ def _open_recipe_page(page, existing_types):
     page.route(f"{BASE}/api/recipe-state", recipe_state)
     page.route(f"{BASE}/api/import-post", lambda route: route.fulfill(json={"status": "idle", "message": ""}))
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html([_recipe()], "example", "favicon.svg")))
+        content_type="text/html", body=render_html([_recipe()], "favicon.svg")))
     page.goto(f"{BASE}/index.html?recipe=r1")
     page.locator("#recipe-type").wait_for()
     return calls
@@ -148,7 +148,7 @@ def test_a_type_set_on_the_recipe_page_finds_the_recipe_in_the_home_page_filter(
     page.route(f"{BASE}/api/recipe-state", recipe_state)
     page.route(f"{BASE}/api/import-post", lambda route: route.fulfill(json={"status": "idle", "message": ""}))
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html([_recipe()], "example", "favicon.svg")))
+        content_type="text/html", body=render_html([_recipe()], "favicon.svg")))
 
     page.goto(f"{BASE}/index.html?recipe=r1")
     page.locator("#recipe-type").fill("מרק")
@@ -169,7 +169,7 @@ def test_source_filter_uses_unknown_for_recipes_from_other_sites(page):
     )
     _open_recipe_page(page, [])
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html([_recipe(), other], "example", "favicon.svg")))
+        content_type="text/html", body=render_html([_recipe(), other], "favicon.svg")))
     page.goto(f"{BASE}/index.html")
     page.locator("#search-source").wait_for()
 
@@ -187,13 +187,16 @@ def test_saving_existing_custom_instagram_recipe_triggers_import_and_updates_sou
     """Regression: a custom-... entry with an Instagram URL must re-import on save,
     replacing the custom id with the real shortcode and setting the correct source profile."""
     custom_id = "custom-1234567890-abc"
-    current_state = [{"overrides": {}, "custom": [{
-        "id": custom_id, "title": "Reel Recipe", "source": "unknown",
-        "sourceUrl": "https://www.instagram.com/reel/SomeShortcode/",
-        "recipeUrl": "", "recipeName": "", "recipeUrls": [], "recipeNames": [],
-        "imageUrl": "", "ingredients": [], "instructions": "",
-        "type": "לא ידוע", "prerequisiteId": "", "notes": "",
-    }], "order": [custom_id]}]
+    custom_recipe = Recipe(
+        id=custom_id, image_url="", caption="Reel Recipe", timestamp_utc="2026-08-24T12:00:00Z",
+        title="Reel Recipe", recipe_url="https://www.instagram.com/reel/SomeShortcode/",
+        recipe_name="", source="unknown", source_name="", added_via="custom",
+    )
+    custom_recipe.post = Post(
+        shortcode=custom_id, url="https://www.instagram.com/reel/SomeShortcode/",
+        typename="GraphReel", is_video=True,
+    )
+    current_state = [{"overrides": {}, "custom": []}]
     import_calls = []
 
     def recipe_state(route):
@@ -211,7 +214,7 @@ def test_saving_existing_custom_instagram_recipe_triggers_import_and_updates_sou
     page.route(f"{BASE}/api/recipe-state", recipe_state)
     page.route(f"{BASE}/api/import-instagram-url", do_import)
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html([_recipe()], "example", "favicon.svg")))
+        content_type="text/html", body=render_html([_recipe(), custom_recipe], "favicon.svg")))
     page.goto(f"{BASE}/index.html?recipe={custom_id}")
     page.locator("#recipe-title").wait_for()
     assert page.locator("#recipe-title").input_value() == "Reel Recipe"
@@ -219,7 +222,7 @@ def test_saving_existing_custom_instagram_recipe_triggers_import_and_updates_sou
     with page.expect_navigation(timeout=8000):
         page.locator("#recipe-form button[type=submit]").click()
 
-    assert import_calls == [{"url": "https://www.instagram.com/reel/SomeShortcode/"}]
+    assert import_calls == [{"url": "https://www.instagram.com/reel/SomeShortcode/", "replaces": custom_id}]
     saved = current_state[0]
     assert not any(r["id"] == custom_id for r in saved.get("custom", []))
     assert "SomeShortcode" in saved.get("overrides", {})

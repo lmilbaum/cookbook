@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import JSON, Boolean, CheckConstraint, Date, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import (
     Mapped,
     MappedAsDataclass,
@@ -58,6 +59,7 @@ class Recipe(MappedAsDataclass, Base, kw_only=True):
     recipe_name: Mapped[str] = mapped_column(Text, default="")
     source: Mapped[str] = mapped_column(String(32), default="lizapanelim")
     source_name: Mapped[str] = mapped_column(Text, default="", server_default="")
+    added_via: Mapped[str] = mapped_column(String(16), default="instagram", server_default="instagram")
     # One-directional on purpose: a Post -> Recipe back-reference would make
     # dataclasses.asdict()/equality recurse Recipe.post.recipe.post... forever.
     #
@@ -69,6 +71,19 @@ class Recipe(MappedAsDataclass, Base, kw_only=True):
         passive_deletes="all",
         default=None,
     )
+
+    __table_args__ = (
+        CheckConstraint("added_via IN ('instagram','website','custom')", name="ck_recipes_added_via"),
+    )
+
+
+class RecipeMadeDate(Base):
+    """One date a recipe was made. Cascades on recipe delete."""
+
+    __tablename__ = "recipe_made_dates"
+
+    recipe_id: Mapped[str] = mapped_column(Text, ForeignKey("recipes.id", ondelete="CASCADE"), primary_key=True)
+    made_on: Mapped[date] = mapped_column(Date, primary_key=True)
 
 
 class Post(MappedAsDataclass, Base, kw_only=True):
