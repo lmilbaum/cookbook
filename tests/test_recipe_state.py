@@ -10,8 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from cookbook import server
-from cookbook.models import RecipeState
-from cookbook.recipe_state_repository import valid_state
+from cookbook.models import Recipe, RecipeState
+from cookbook.recipe_state_repository import load_recipe_state, valid_state
 
 
 @pytest.fixture
@@ -40,6 +40,16 @@ def test_api_preserves_edits_and_rejects_stale_saves(storage, tmp_path, monkeypa
         handler.do_PUT()
         return responses.pop()
 
+    # Seed a recipe row for "post" so the pruning logic doesn't drop it
+    from cookbook.database import session_scope
+    from cookbook.models import Recipe as RecipeModel
+    with session_scope(storage) as session:
+        session.add(RecipeModel(
+            id="post", image_url="", caption="", timestamp_utc="2026-01-01T00:00:00Z",
+            title="Test Post", recipe_url="", recipe_name="", source="lizapanelim",
+            source_name="", added_via="instagram",
+        ))
+
     empty = {"overrides": {}, "custom": []}
     assert get() == (200, {"revision": 0, "state": empty})
     state = {"overrides": {"post": {"notes": "הערות", "title": "Edited"}},
@@ -57,7 +67,8 @@ def test_api_preserves_edits_and_rejects_stale_saves(storage, tmp_path, monkeypa
                       "custom": [], "order": ["custom-1", "post"]}
     assert get() == (200, {"revision": 1, "state": migrated_state})
     assert put(empty, 1) == (200, {"revision": 2})
-    assert get() == (200, {"revision": 2, "state": empty})
+    # custom-1 still exists in the DB, so load_recipe_state re-appends it to order
+    assert get() == (200, {"revision": 2, "state": {**empty, "order": ["custom-1"]}})
     assert put(state, 0)[0] == 409  # Never reimport after an intentional clear.
 
     def unavailable(*args):
@@ -87,6 +98,38 @@ def test_saved_types_list_is_validated():
     assert not valid_state({**base, "types": "סלט"})
     assert not valid_state({**base, "types": ["סלט", 1]})
     assert not valid_state({**base, "types": ["  "]})
+
+
+def test_load_recipe_state_appends_custom_recipes_missing_from_order(storage):
+    """Custom recipes in the DB are always present in state.order.
+
+    Regression for the bug where POST /api/recipes could succeed (saving the
+    recipe row) but the browser's fetch timed out before receiving the 201,
+    so state.order was never updated — leaving the recipe invisible in the grid.
+    """
+    from cookbook.database import session_scope
+
+    # Persist a state without custom-orphan in its order
+    with session_scope(storage) as session:
+        session.add(RecipeState(id=1, revision=1, payload={"overrides": {}, "custom": [], "order": ["other-recipe"]}))
+        # "other-recipe" must exist in the DB so pruning doesn't remove it
+        session.add(Recipe(
+            id="other-recipe", image_url="", caption="", timestamp_utc="2026-01-01T00:00:00Z",
+            title="Other Recipe", recipe_url="", recipe_name="", source="lizapanelim",
+            source_name="", added_via="instagram",
+        ))
+        # Simulate the race: recipe row exists in DB but state.order was never updated
+        session.add(Recipe(
+            id="custom-orphan", image_url="", caption="", timestamp_utc="2026-01-01T00:00:00Z",
+            title="Orphan Recipe", recipe_url="", recipe_name="", source="unknown",
+            source_name="", added_via="custom",
+        ))
+
+    result = load_recipe_state(storage)
+    assert "custom-orphan" in result["state"]["order"]
+    assert "other-recipe" in result["state"]["order"]
+    # orphan appended after existing order entries
+    assert result["state"]["order"].index("other-recipe") < result["state"]["order"].index("custom-orphan")
 
 
 def test_recipes_saved_from_the_page_are_valid():

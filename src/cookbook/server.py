@@ -585,11 +585,11 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                 except SQLAlchemyError:
                     self._json_response(503, {"error": "Unable to create recipe"})
                     return
+                self._json_response(201, {"id": recipe.id, "added_via": "custom"})
                 try:
                     imports.refresh()
                 except (SQLAlchemyError, OSError, TypeError, ValueError):
                     pass
-                self._json_response(201, {"id": recipe.id, "added_via": "custom"})
                 return
 
             # POST /api/recipes/<id>/made-dates (add made date)

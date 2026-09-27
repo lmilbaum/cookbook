@@ -10,7 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from cookbook import recipe_state_import
-from cookbook.database import Base
+from cookbook.database import Base, session_scope
+from cookbook.models import Recipe
 from cookbook.recipe_state_repository import load_recipe_state, save_recipe_state
 
 
@@ -36,6 +37,14 @@ def test_import_preserves_complete_state_and_source(importer):
             "instructions": "Mix", "prerequisiteId": "post"}],
         "order": ["custom-1", "post"],
     }
+    # Seed "post" so that load_recipe_state doesn't prune it from state.order
+    with session_scope(factory) as session:
+        session.add(Recipe(
+            id="post", image_url="", caption="", timestamp_utc="2026-01-01T00:00:00Z",
+            title="", recipe_url="", recipe_name="", source="lizapanelim",
+            source_name="", added_via="instagram",
+        ))
+
     original = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     source.write_text(original, encoding="utf-8")
     recipe_state_import.main()

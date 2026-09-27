@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import session_scope
@@ -61,8 +61,28 @@ def load_recipe_state(factory: sessionmaker[Session]) -> dict[str, Any]:
     with factory() as session:
         row = session.get(RecipeState, 1)
         if row is None:
-            return {"revision": 0, "state": {"overrides": {}, "custom": []}}
-        return {"revision": row.revision, "state": row.payload}
+            result = {"revision": 0, "state": {"overrides": {}, "custom": []}}
+        else:
+            result = {"revision": row.revision, "state": dict(row.payload)}
+
+        # Self-heal state.order:
+        # 1. Remove IDs for recipes that no longer exist in the DB (e.g. a custom recipe
+        #    that was replaced by an Instagram import deletes its row, but the browser may
+        #    have saved the stale ID before reloading — causing createCard(undefined) crash).
+        # 2. Append custom recipe IDs that exist in the DB but are absent from state.order
+        #    (recovers from POST /api/recipes race where the 201 never reached the browser).
+        all_ids = set(session.scalars(select(Recipe.id)))
+        order: list[str] = list(result["state"].get("order", []))
+        order = [rid for rid in order if rid in all_ids]
+        custom_ids = list(
+            session.scalars(select(Recipe.id).where(Recipe.added_via == "custom"))
+        )
+        order_set = set(order)
+        missing = [rid for rid in custom_ids if rid not in order_set]
+        if missing or len(order) != len(result["state"].get("order", [])):
+            result["state"] = {**result["state"], "order": order + missing}
+
+        return result
 
 
 def save_recipe_state(factory: sessionmaker[Session], state: dict[str, Any], revision: int) -> int:
