@@ -824,7 +824,7 @@ def render_html(
         }};
         searchForm.addEventListener("change", applySourceFilter);
         const recipesById = new Map(allRecipes().map((recipe) => [recipe.id, recipe]));
-        state.order.forEach((id) => grid.append(createCard(recipesById.get(id))));
+        state.order.forEach((id) => {{ const recipe = recipesById.get(id); if (recipe) grid.append(createCard(recipe)); }});
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
         applySourceFilter();
         // Recipes open in a popup over the home page; the grid card stays the source of truth.
@@ -1047,7 +1047,9 @@ def render_html(
               recipe.source = importData.source || recipe.source;
               recipe.sourceName = importData.sourceName || "";
               state.overrides[recipe.id] = recipe;
-              if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
+              const oldIdx = state.order.indexOf(existingId);
+              if (oldIdx !== -1) state.order.splice(oldIdx, 1, recipe.id);
+              else if (!state.order.includes(recipe.id)) state.order.push(recipe.id);
               save(saveStatus);
               location.reload();
               return;

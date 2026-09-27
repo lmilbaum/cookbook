@@ -210,7 +210,7 @@ class RenderHtmlTests(unittest.TestCase):
         document = render_html([make_recipe()], "favicon.svg")
 
         self.assertIn("const recipesById = new Map(allRecipes()", document)
-        self.assertIn("state.order.forEach((id) => grid.append(createCard(recipesById.get(id))))", document)
+        self.assertIn("state.order.forEach((id) => { const recipe = recipesById.get(id); if (recipe) grid.append(createCard(recipe)); })", document)
 
     def test_new_recipes_are_appended_to_the_shared_collection_order(self) -> None:
         document = render_html([make_recipe()], "favicon.svg")
