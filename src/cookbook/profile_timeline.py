@@ -39,10 +39,8 @@ class ProfileTimeline:
             return
         edges, info = connection.get("edges"), connection.get("page_info")
         if not isinstance(edges, list) or not isinstance(info, dict):
-            self.invalid = True
             return
         if type(info.get("has_next_page")) is not bool:
-            self.invalid = True
             return
         # A malformed node is skipped; only page-level errors make the pagination state untrustworthy.
         for edge in edges:

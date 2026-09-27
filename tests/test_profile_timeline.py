@@ -107,14 +107,26 @@ def test_single_malformed_edge_does_not_abort_profile_scan():
     # has_next_page is a string, not bool
     {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": {"has_next_page": "false"}}}},
 ])
-def test_structural_page_errors_still_invalidate(bad_page):
+def test_structural_page_weirdness_is_skipped_not_invalidating(bad_page):
     timeline = ProfileTimeline()
     timeline.consume(bad_page)
-    assert timeline.invalid
+    assert not timeline.invalid
     assert not timeline.complete
 
 
-def test_structural_error_still_raises_incomplete_error():
+def test_structural_weirdness_recovers_on_next_valid_response():
+    """A bad has_next_page on one response must not prevent a later valid response from completing the scan."""
+    timeline = ProfileTimeline()
+    bad_page = {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": {"has_next_page": None}}}}
+    timeline.consume(bad_page)
+    assert not timeline.invalid and not timeline.complete
+    timeline.consume(payload([{"code": "only_post", "taken_at": 1}], False))
+    assert timeline.complete
+    assert timeline.paths() == ["/p/only_post/"]
+
+
+def test_stalled_scan_on_structural_weirdness_raises_unconfirmed():
+    """If all responses are structurally malformed the scroll times out with pagination_unconfirmed."""
     timeline = ProfileTimeline()
     bad_page = {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": None}}}
 
@@ -124,5 +136,5 @@ def test_structural_error_still_raises_incomplete_error():
         def wait_for_timeout(self, milliseconds):
             timeline.consume(bad_page)
 
-    with pytest.raises(IncompleteProfileError):
+    with pytest.raises(IncompleteProfileError, match="did not confirm"):
         _scroll_profile_until_complete(FakePage(), "example", timeline)
