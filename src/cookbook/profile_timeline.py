@@ -34,6 +34,7 @@ class ProfileTimeline:
         if not isinstance(connection, dict):
             return
         if payload.get("errors"):
+            print(f"Skipping GraphQL response with errors: {payload['errors']}")
             return
         edges, info = connection.get("edges"), connection.get("page_info")
         if not isinstance(edges, list) or not isinstance(info, dict):
