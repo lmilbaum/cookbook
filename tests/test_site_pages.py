@@ -93,6 +93,7 @@ class RenderHtmlTests(unittest.TestCase):
                 "instructions": "",
                 "prerequisiteId": "",
                 "notes": "",
+                "added_via": "instagram",
             },
             ensure_ascii=False,
         )
@@ -220,8 +221,8 @@ class RenderHtmlTests(unittest.TestCase):
     def test_custom_recipe_link_uses_the_entered_title_not_the_url_filename(self) -> None:
         document = render_html([make_recipe()], "favicon.svg")
 
-        self.assertIn("index === 0 && !baseIds.has(recipe.id)", document)
-        self.assertIn("const recipeName = isCustomRecipe", document)
+        self.assertIn("const isEditingCustom = existingId && isCustom(previous)", document)
+        self.assertIn("const recipeName = !existingId || isEditingCustom", document)
         self.assertIn("? title", document)
 
     def test_empty_report_still_contains_add_recipe_interface(self) -> None:
@@ -274,7 +275,7 @@ class RenderHtmlTests(unittest.TestCase):
     def test_custom_recipes_default_to_the_unknown_source_bucket(self) -> None:
         document = render_html([make_recipe()], "favicon.svg")
 
-        self.assertIn('openEditor({ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown" }, true)', document)
+        self.assertIn('openEditor({ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown", added_via: "custom" }, true)', document)
         self.assertIn('source: previous.source || "unknown"', document)
 
     def test_unknown_type_sorts_last_in_type_filter_dropdown(self) -> None:

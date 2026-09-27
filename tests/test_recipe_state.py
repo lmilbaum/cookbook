@@ -16,8 +16,9 @@ from cookbook.recipe_state_repository import valid_state
 
 @pytest.fixture
 def storage():
+    from cookbook.database import Base
     engine = create_engine("sqlite://")
-    RecipeState.__table__.create(engine)
+    Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine)
     engine.dispose()
 
@@ -49,7 +50,12 @@ def test_api_preserves_edits_and_rejects_stale_saves(storage, tmp_path, monkeypa
     assert put(empty, 0)[0] == 409
     assert put({"overrides": [], "custom": []}, 1)[0] == 400
     assert put(empty, True)[0] == 400
-    assert get() == (200, {"revision": 1, "state": state})
+    # After migration, custom items are moved to overrides and custom is cleared
+    migrated_state = {"overrides": {"post": {"notes": "הערות", "title": "Edited"},
+                                    "custom-1": {"id": "custom-1", "title": "Soup", "ingredients": [
+                                        {"name": "Salt", "amount": "1", "varieties": "Sea"}]}},
+                      "custom": [], "order": ["custom-1", "post"]}
+    assert get() == (200, {"revision": 1, "state": migrated_state})
     assert put(empty, 1) == (200, {"revision": 2})
     assert get() == (200, {"revision": 2, "state": empty})
     assert put(state, 0)[0] == 409  # Never reimport after an intentional clear.

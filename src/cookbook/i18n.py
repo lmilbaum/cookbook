@@ -89,6 +89,14 @@ _HEBREW: dict[str, str] = {
     "recipes_load_failed": "לא ניתן לטעון את המתכונים. יש לרענן את הדף ולנסות שוב; נתוני הדפדפן נשמרו.",
     "recipes_browser_save_failed": "לא ניתן לשמור בדפדפן זה.",
     "recipes_save_unrecoverable": "השמירה נכשלה וגיבוי הדפדפן אינו זמין. השאירו את הדף פתוח והעתיקו את השינויים.",
+    # Made dates.
+    "made_dates": "הכנתי בתאריכים",
+    "made_date_input": "תאריך ההכנה",
+    "mark_made": "סימון כהוכן",
+    "made_never": "עדיין לא הוכן.",
+    "remove_made_date": "הסרת התאריך {date}",
+    "made_dates_load_failed": "לא ניתן לטעון את תאריכי ההכנה.",
+    "made_dates_save_failed": "לא ניתן לעדכן את תאריכי ההכנה. נסו שוב.",
     # Notes page.
     "back_to_cookbook": "חזרה לספר המתכונים",
     "notes_intro": "ההערות נשמרות אוטומטית.",
@@ -200,6 +208,14 @@ _ENGLISH: dict[str, str] = {
     "recipes_load_failed": "Unable to load recipes. Reload to retry; browser data is retained.",
     "recipes_browser_save_failed": "Unable to save in this browser.",
     "recipes_save_unrecoverable": "Save failed and browser backup is unavailable. Keep this page open and copy your edits.",
+    # Made dates.
+    "made_dates": "Made on",
+    "made_date_input": "Date made",
+    "mark_made": "Mark as made",
+    "made_never": "Not made yet.",
+    "remove_made_date": "Remove {date}",
+    "made_dates_load_failed": "Unable to load the dates made.",
+    "made_dates_save_failed": "Unable to update the dates made. Try again.",
     # Notes page.
     "back_to_cookbook": "Back to cookbook",
     "notes_intro": "Notes are saved automatically.",

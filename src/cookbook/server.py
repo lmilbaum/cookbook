@@ -25,11 +25,23 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import load_config
-from .database import create_session_factory
+from .database import create_session_factory, session_scope
 from .import_service import ImportService
+from .made_date_repository import (
+    add_made_date,
+    list_made_dates,
+    parse_made_on,
+    remove_made_date,
+)
 from .models import Recipe, RecipeState
 from .post_import_job import import_post_by_url
-from .post_repository import load_recipes, mark_not_recipe
+from .post_repository import (
+    create_custom_recipe,
+    delete_custom_recipe,
+    load_recipes,
+    mark_not_recipe,
+    replace_custom_with_import,
+)
 from .recipe_image_repository import load_recipe_image
 from .recipe_page_repository import load_recipe_page
 from .recipe_photo_repository import load_recipe_photo, photo_ids
@@ -263,6 +275,9 @@ _RECIPE_PHOTO_PATH = re.compile(r"^/recipes/photos/([^/]+)$")
 # Saved recipe edits still point at the old cached files, e.g. /lizapanelim_posts_assets/<id>.jpg.
 _LEGACY_PHOTO_PATH = re.compile(r"^/[^/]+_posts_assets/([^/]+)\.(?:jpg|jpeg|png|webp)$")
 _NOT_RECIPE_PATH = re.compile(r"^/api/recipes/([^/]+)/not-recipe$")
+_RECIPES_PATH = re.compile(r"^/api/recipes$")
+_RECIPE_PATH = re.compile(r"^/api/recipes/([^/]+)$")
+_MADE_DATES_PATH = re.compile(r"^/api/recipes/([^/]+)/made-dates(?:/([^/]+))?$")
 _TYPES_PATH = re.compile(r"^/api/recipe-types(?:/(\d+))?$")
 
 
@@ -355,13 +370,83 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             return True
 
         def do_DELETE(self) -> None:
-            if not self._handle_types("DELETE"):
-                self._json_response(404, {"error": "Not found"})
+            if self._handle_types("DELETE"):
+                return
+            request_path = unquote(urlsplit(self.path).path)
+
+            # DELETE /api/recipes/<id>
+            recipe_match = _RECIPE_PATH.fullmatch(request_path)
+            if recipe_match:
+                recipe_id = recipe_match.group(1)
+                try:
+                    deleted = delete_custom_recipe(factory, recipe_id)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to delete recipe"})
+                    return
+                if not deleted:
+                    self._json_response(404, {"error": "Not found"})
+                    return
+                try:
+                    imports.refresh()
+                except (SQLAlchemyError, OSError, TypeError, ValueError):
+                    pass
+                self._json_response(200, {})
+                return
+
+            # DELETE /api/recipes/<id>/made-dates/<date>
+            made_dates_match = _MADE_DATES_PATH.fullmatch(request_path)
+            if made_dates_match:
+                recipe_id = made_dates_match.group(1)
+                made_on_str = made_dates_match.group(2)
+                if not made_on_str:
+                    self._json_response(400, {"error": "Date required"})
+                    return
+                try:
+                    made_on = parse_made_on(made_on_str)
+                except ValueError:
+                    self._json_response(400, {"error": "Invalid date"})
+                    return
+                try:
+                    removed = remove_made_date(factory, recipe_id, made_on)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to update recipe"})
+                    return
+                if not removed:
+                    self._json_response(404, {"error": "Not found"})
+                    return
+                try:
+                    dates = list_made_dates(factory, recipe_id)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to read dates"})
+                    return
+                self._json_response(200, {"dates": dates})
+                return
+
+            self._json_response(404, {"error": "Not found"})
 
         def do_GET(self) -> None:
             if self._handle_types("GET"):
                 return
             request_path = unquote(urlsplit(self.path).path)
+
+            # GET /api/recipes/<id>/made-dates
+            made_dates_match = _MADE_DATES_PATH.fullmatch(request_path)
+            if made_dates_match and not made_dates_match.group(2):
+                recipe_id = made_dates_match.group(1)
+                try:
+                    # Check if recipe exists
+                    with factory() as session:
+                        recipe = session.get(Recipe, recipe_id)
+                        if recipe is None:
+                            self._json_response(404, {"error": "Recipe not found"})
+                            return
+                    dates = list_made_dates(factory, recipe_id)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to read dates"})
+                    return
+                self._json_response(200, {"dates": dates})
+                return
+
             recipe_image_match = _RECIPE_IMAGE_PATH.fullmatch(request_path)
             recipe_photo_match = _RECIPE_PHOTO_PATH.fullmatch(request_path) or _LEGACY_PHOTO_PATH.fullmatch(request_path)
             if recipe_image_match or recipe_photo_match:
@@ -474,7 +559,84 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
         def do_POST(self) -> None:
             if self._handle_types("POST"):
                 return
-            not_recipe_match = _NOT_RECIPE_PATH.fullmatch(unquote(urlsplit(self.path).path))
+            request_path = unquote(urlsplit(self.path).path)
+
+            # POST /api/recipes (create custom recipe)
+            if _RECIPES_PATH.fullmatch(request_path):
+                try:
+                    if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                        raise ValueError
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 10_000:
+                        raise ValueError
+                    body = json.loads(self.rfile.read(length))
+                    if not isinstance(body, dict) or "title" not in body or not isinstance(body["title"], str):
+                        raise ValueError
+                    title = body["title"].strip()
+                    if not title:
+                        raise ValueError
+                except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                    self._json_response(400, {"error": "Expected a JSON object with a title"})
+                    return
+                try:
+                    recipe = create_custom_recipe(title)
+                    with session_scope(factory) as session:
+                        session.add(recipe)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to create recipe"})
+                    return
+                try:
+                    imports.refresh()
+                except (SQLAlchemyError, OSError, TypeError, ValueError):
+                    pass
+                self._json_response(201, {"id": recipe.id, "added_via": "custom"})
+                return
+
+            # POST /api/recipes/<id>/made-dates (add made date)
+            made_dates_match = _MADE_DATES_PATH.fullmatch(request_path)
+            if made_dates_match and not made_dates_match.group(2):
+                recipe_id = made_dates_match.group(1)
+                try:
+                    if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                        raise ValueError
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 10_000:
+                        raise ValueError
+                    body = json.loads(self.rfile.read(length))
+                    if not isinstance(body, dict) or "date" not in body or not isinstance(body["date"], str):
+                        raise ValueError
+                    made_on = parse_made_on(body["date"])
+                except ValueError:
+                    self._json_response(400, {"error": "Expected a JSON object with a valid date"})
+                    return
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self._json_response(400, {"error": "Invalid JSON"})
+                    return
+                try:
+                    # Check if recipe exists
+                    with factory() as session:
+                        recipe = session.get(Recipe, recipe_id)
+                        if recipe is None:
+                            self._json_response(404, {"error": "Recipe not found"})
+                            return
+                    # Add the made date
+                    success = add_made_date(factory, recipe_id, made_on)
+                    if not success:
+                        # Insertion failed; check if recipe still exists (TOCTOU check)
+                        with factory() as session:
+                            recipe = session.get(Recipe, recipe_id)
+                            if recipe is None:
+                                self._json_response(404, {"error": "Recipe not found"})
+                                return
+                        # Recipe still exists, so it was a duplicate - continue
+                    dates = list_made_dates(factory, recipe_id)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to update recipe"})
+                    return
+                self._json_response(201, {"dates": dates})
+                return
+
+            not_recipe_match = _NOT_RECIPE_PATH.fullmatch(request_path)
             if not_recipe_match:
                 try:
                     marked = mark_not_recipe(factory, not_recipe_match.group(1))
@@ -514,6 +676,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     if not isinstance(body, dict) or "url" not in body or not isinstance(body["url"], str):
                         raise ValueError
                     url = body["url"].strip()
+                    replaces = body.get("replaces", "").strip() if isinstance(body.get("replaces"), str) else None
                 except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
                     self._json_response(400, {"error": "Expected a JSON object with a url"})
                     return
@@ -522,6 +685,14 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     self._json_response(503, {"error": "Failed to import post from Instagram"})
                     return
                 shortcode, source, source_name = result
+
+                # If replacing a custom recipe, move its made-dates and delete it
+                if replaces and replaces != shortcode:
+                    try:
+                        replace_custom_with_import(factory, replaces, shortcode)
+                    except SQLAlchemyError:
+                        pass  # Non-fatal; the new recipe is still imported
+
                 try:
                     imports.refresh()
                 except (SQLAlchemyError, OSError, TypeError, ValueError):

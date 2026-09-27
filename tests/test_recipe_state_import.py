@@ -39,11 +39,23 @@ def test_import_preserves_complete_state_and_source(importer):
     original = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     source.write_text(original, encoding="utf-8")
     recipe_state_import.main()
-    assert load_recipe_state(factory) == {"revision": 1, "state": state}
+    # After migration, custom recipes are moved to overrides and custom is cleared
+    migrated_state = {
+        "overrides": {
+            "post": {"title": "מרק", "notes": "Family recipe"},
+            "custom-1": {"id": "custom-1", "title": "Soup", "ingredients": [
+                {"name": "Salt", "amount": "1", "varieties": "Sea"}],
+                "instructions": "Mix", "prerequisiteId": "post"}
+        },
+        "custom": [],
+        "order": ["custom-1", "post"],
+    }
+    assert load_recipe_state(factory) == {"revision": 1, "state": migrated_state}
     with pytest.raises(SystemExit) as error:
         recipe_state_import.main()
     assert error.value.code == 2
-    assert load_recipe_state(factory) == {"revision": 1, "state": state}
+    # After a failed reimport attempt, the state should remain migrated
+    assert load_recipe_state(factory) == {"revision": 1, "state": migrated_state}
     assert source.read_text(encoding="utf-8") == original
 
 
