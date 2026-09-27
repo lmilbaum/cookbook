@@ -687,6 +687,8 @@ def fetch_posts_browser(
             print("Scrolling to load posts...")
             media_paths = _scroll_profile_until_complete(page, username, timeline)
             print(f"Collected {len(media_paths)} media items from the profile grid")
+            if timeline is not None and timeline.skipped_edges:
+                print(f"Skipped {timeline.skipped_edges} malformed timeline entr{'y' if timeline.skipped_edges == 1 else 'ies'}")
 
             if not media_paths:
                 raise RuntimeError(

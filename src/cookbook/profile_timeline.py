@@ -14,6 +14,7 @@ class ProfileTimeline:
         self.posts: dict[str, tuple[int, str]] = {}
         self.complete = False
         self.invalid = False
+        self.skipped_edges: int = 0
 
     def observe(self, response: Any) -> None:
         if "graphql" not in response.url:
@@ -43,15 +44,16 @@ class ProfileTimeline:
         if type(info.get("has_next_page")) is not bool:
             self.invalid = True
             return
+        # A malformed node is skipped; only page-level errors make the pagination state untrustworthy.
         for edge in edges:
             node = edge.get("node") if isinstance(edge, dict) else None
             if not isinstance(node, dict):
-                self.invalid = True
+                self.skipped_edges += 1
                 continue
             code, timestamp = node.get("code"), node.get("taken_at")
             if (not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", code)
                 or type(timestamp) is not int or timestamp <= 0):
-                self.invalid = True
+                self.skipped_edges += 1
                 continue
             kind = "reel" if node.get("product_type") == "clips" else "p"
             self.posts[code] = (timestamp, f"/{kind}/{code}/")

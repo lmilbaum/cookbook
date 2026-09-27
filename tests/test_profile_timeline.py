@@ -51,10 +51,13 @@ def test_stalled_partial_profile_never_selects_a_post():
         _scroll_profile_until_complete(Page(), 'example', timeline)
 
 
-def test_missing_publication_time_prevents_selection():
+def test_missing_publication_time_skips_only_that_node():
     timeline = ProfileTimeline()
-    timeline.consume(payload([{'code': 'unknown'}], False))
-    assert timeline.invalid and not timeline.complete
+    timeline.consume(payload([{'code': 'unknown'}, {'code': 'good', 'taken_at': 1}], False))
+    assert not timeline.invalid
+    assert timeline.complete
+    assert timeline.paths() == ['/p/good/']
+    assert timeline.skipped_edges == 1
 
 
 def test_partial_graphql_error_cannot_confirm_completion():
@@ -63,3 +66,63 @@ def test_partial_graphql_error_cannot_confirm_completion():
     result['errors'] = [{'message': 'Partial response'}]
     timeline.consume(result)
     assert timeline.invalid and not timeline.complete
+
+
+def test_single_malformed_edge_does_not_abort_profile_scan():
+    """A null node on page 1 must not abort the scan; the valid posts are returned."""
+    timeline = ProfileTimeline()
+    pages = iter([
+        {
+            "data": {
+                ProfileTimeline.connection_key: {
+                    "edges": [{"node": None}, {"node": {"code": "newer", "taken_at": 2}}],
+                    "page_info": {"has_next_page": True},
+                }
+            }
+        },
+        payload([{"code": "bad!code", "taken_at": 3}, {"code": "oldest", "taken_at": 1}], False),
+    ])
+
+    class FakePage:
+        def evaluate(self, script):
+            pass
+        def wait_for_timeout(self, milliseconds):
+            page = next(pages, None)
+            if page is not None:
+                timeline.consume(page)
+
+    result = _scroll_profile_until_complete(FakePage(), "example", timeline)
+    assert result == ["/p/newer/", "/p/oldest/"]
+    assert timeline.skipped_edges == 2
+    assert _select_unseen_media_paths(result, set(), 1) == ["/p/oldest/"]
+
+
+@pytest.mark.parametrize("bad_page", [
+    # page_info missing
+    {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": None}}},
+    # edges not a list
+    {"data": {ProfileTimeline.connection_key: {"edges": "nope", "page_info": {"has_next_page": False}}}},
+    # has_next_page missing
+    {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": {}}}},
+    # has_next_page is a string, not bool
+    {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": {"has_next_page": "false"}}}},
+])
+def test_structural_page_errors_still_invalidate(bad_page):
+    timeline = ProfileTimeline()
+    timeline.consume(bad_page)
+    assert timeline.invalid
+    assert not timeline.complete
+
+
+def test_structural_error_still_raises_incomplete_error():
+    timeline = ProfileTimeline()
+    bad_page = {"data": {ProfileTimeline.connection_key: {"edges": [], "page_info": None}}}
+
+    class FakePage:
+        def evaluate(self, script):
+            pass
+        def wait_for_timeout(self, milliseconds):
+            timeline.consume(bad_page)
+
+    with pytest.raises(IncompleteProfileError):
+        _scroll_profile_until_complete(FakePage(), "example", timeline)
