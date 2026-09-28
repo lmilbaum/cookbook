@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from cookbook.browser_scraper import _fetch_post_details, _select_unseen_media_paths
+from cookbook.browser_scraper import (
+    _fetch_post_details,
+    _normalize_instagram_image_url,
+    _select_unseen_media_paths,
+)
+
+
+def test_instagram_image_url_preserves_required_transform_signature() -> None:
+    url = "https://cdn.example/cover.jpg?stp=dst-jpg_e35_s640x640&oh=signed"
+
+    assert _normalize_instagram_image_url(url) == url
 
 
 def test_select_position_from_end_uses_only_unseen_posts() -> None:

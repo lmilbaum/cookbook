@@ -73,7 +73,7 @@ class Recipe(MappedAsDataclass, Base, kw_only=True):
     )
 
     __table_args__ = (
-        CheckConstraint("added_via IN ('instagram','website','custom')", name="ck_recipes_added_via"),
+        CheckConstraint("added_via IN ('instagram','manual')", name="ck_recipes_added_via"),
     )
 
 

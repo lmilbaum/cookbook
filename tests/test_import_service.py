@@ -17,6 +17,7 @@ from cookbook.post_repository import (
     load_recipes,
     mark_not_recipe,
 )
+from cookbook.recipe_photo_repository import insert_recipe_photo, load_recipe_photo
 
 
 def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, monkeypatch):
@@ -219,7 +220,10 @@ def test_import_post_by_url_scrapes_and_stores_recipe(tmp_path, monkeypatch):
 
     def fake_fetch(media_path, **kwargs):
         fetched_paths.append(media_path)
-        item = Recipe(id="Dcnm2wQtTVk", image_url="", caption="test", timestamp_utc="2026-01-01")
+        item = Recipe(
+            id="Dcnm2wQtTVk", image_url="https://images.example/post.jpg",
+            caption="test", timestamp_utc="2026-01-01",
+        )
         item.post = Post(shortcode="Dcnm2wQtTVk", url="https://www.instagram.com/p/Dcnm2wQtTVk/", typename="GraphImage", is_video=False)
         return item
 
@@ -232,10 +236,56 @@ def test_import_post_by_url_scrapes_and_stores_recipe(tmp_path, monkeypatch):
     )
 
     assert result is not None
-    shortcode, source, _name = result
+    shortcode, source, _name, image_url = result
     assert shortcode == "Dcnm2wQtTVk"
+    assert image_url == "https://images.example/post.jpg"
     assert fetched_paths == ["/p/Dcnm2wQtTVk/"]
     assert {r.id for r in load_recipes(factory, False)} == {"Dcnm2wQtTVk"}
+    engine.dispose()
+
+
+def test_import_post_by_url_refreshes_existing_image_and_cached_photo(tmp_path, monkeypatch):
+    """Re-importing a URL must replace a stale Instagram cover without losing its title."""
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    existing = Recipe(
+        id="reel1", image_url="https://cdn.example/placeholder.png", caption="old",
+        timestamp_utc="2026-01-01", title="Peach Syrup", added_via="instagram",
+    )
+    existing.post = Post(
+        shortcode="reel1", url="https://www.instagram.com/reel/reel1/",
+        typename="GraphVideo", is_video=True,
+    )
+    insert_missing_recipes(factory, [existing])
+    insert_recipe_photo(factory, "reel1", "image/png", b"placeholder")
+
+    def fake_fetch(media_path, **kwargs):
+        item = Recipe(
+            id="reel1", image_url="https://cdn.example/cover.jpg?stp=required",
+            caption="fresh", timestamp_utc="2026-02-01",
+        )
+        item.post = Post(
+            shortcode="reel1", url="https://www.instagram.com/reel/reel1/",
+            typename="GraphVideo", is_video=True,
+        )
+        item._photo_bytes = b"correct cover"
+        item._photo_content_type = "image/jpeg"
+        return item
+
+    monkeypatch.setattr(post_import_job, "fetch_post_by_url_browser", fake_fetch)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+
+    result = post_import_job.import_post_by_url(
+        tmp_path, factory, "https://www.instagram.com/reel/reel1/"
+    )
+
+    assert result is not None
+    refreshed = load_recipes(factory, False)[0]
+    assert refreshed.title == "Peach Syrup"
+    assert refreshed.image_url == "https://cdn.example/cover.jpg?stp=required"
+    assert load_recipe_photo(factory, "reel1") == (b"correct cover", "image/jpeg")
     engine.dispose()
 
 
@@ -263,9 +313,37 @@ def test_import_post_by_url_supports_reel_urls(tmp_path, monkeypatch):
     )
 
     assert result is not None
-    shortcode, _, __ = result
+    shortcode, _, __, ___ = result
     assert shortcode == "DMTxeG4J0H3"
     assert fetched_paths == ["/reel/DMTxeG4J0H3/"]
+    engine.dispose()
+
+
+def test_import_post_by_url_normalizes_plural_reels_urls(tmp_path, monkeypatch):
+    """Instagram share URLs sometimes use /reels/, which the scraper expects as /reel/."""
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    fetched_paths = []
+
+    def fake_fetch(media_path, **kwargs):
+        fetched_paths.append(media_path)
+        item = Recipe(id="DcJrkA1qjH9", image_url="https://images.example/peach.jpg", caption="", timestamp_utc="2026-01-01")
+        item.post = Post(shortcode=item.id, url="https://www.instagram.com/reel/DcJrkA1qjH9/", typename="GraphVideo", is_video=True)
+        return item
+
+    monkeypatch.setattr(post_import_job, "fetch_post_by_url_browser", fake_fetch)
+    monkeypatch.setattr(post_import_job, "store_missing_photos", lambda f, r: None)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+
+    result = post_import_job.import_post_by_url(
+        tmp_path, factory, "https://www.instagram.com/reels/DcJrkA1qjH9/"
+    )
+
+    assert result is not None
+    assert result[0] == "DcJrkA1qjH9"
+    assert fetched_paths == ["/reel/DcJrkA1qjH9/"]
     engine.dispose()
 
 

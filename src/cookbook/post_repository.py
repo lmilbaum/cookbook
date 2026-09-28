@@ -71,7 +71,7 @@ def insert_missing_recipes(
             if session.get(Recipe, recipe.id) is not None:
                 continue
             recipe.source = classify_source(recipe)
-            recipe.added_via = "instagram" if recipe.post else "website"
+            recipe.added_via = "instagram" if recipe.post else "manual"
             session.add(recipe)
             inserted += 1
     return inserted
@@ -91,8 +91,8 @@ def mark_not_recipe(factory: sessionmaker[Session], shortcode: str) -> bool:
     return True
 
 
-def create_custom_recipe(title: str) -> Recipe:
-    """Create a new custom recipe and return it (unsaved)."""
+def create_manual_recipe(title: str) -> Recipe:
+    """Create a new manually added recipe and return it (unsaved)."""
     recipe_id = f"custom-{int(time.time() * 1000)}-{secrets.token_hex(8)}"
     return Recipe(
         id=recipe_id,
@@ -104,22 +104,22 @@ def create_custom_recipe(title: str) -> Recipe:
         recipe_name="",
         source="unknown",
         source_name="",
-        added_via="custom",
+        added_via="manual",
     )
 
 
-def delete_custom_recipe(factory: sessionmaker[Session], recipe_id: str) -> bool:
-    """Delete a custom recipe. Returns True if it existed and was deleted."""
+def delete_manual_recipe(factory: sessionmaker[Session], recipe_id: str) -> bool:
+    """Delete a manual recipe. Returns True if it existed and was deleted."""
     with session_scope(factory) as session:
         recipe = session.get(Recipe, recipe_id)
-        if recipe is None or recipe.added_via != "custom":
+        if recipe is None or recipe.added_via != "manual":
             return False
         session.delete(recipe)
         return True
 
 
-def replace_custom_with_import(factory: sessionmaker[Session], old_id: str, new_recipe_id: str) -> None:
-    """Move all made-dates from old_id to new_recipe_id (on conflict, drop old), then delete the custom recipe."""
+def replace_manual_with_import(factory: sessionmaker[Session], old_id: str, new_recipe_id: str) -> None:
+    """Move made-dates to an import, then delete the replaced manual recipe."""
     from .made_date_repository import move_made_dates
 
     with session_scope(factory) as session:

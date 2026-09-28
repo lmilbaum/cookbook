@@ -170,7 +170,7 @@ def main() -> None:  # pylint: disable=too-many-branches,too-many-locals,too-man
             # of how many posts have already been imported.
             fetch_config = replace(config, limit=1)
         else:
-            imported_count = len([r for r in existing_recipes if r.added_via != "custom"])
+            imported_count = len([r for r in existing_recipes if r.added_via != "manual"])
             remaining_slots = max(config.limit - imported_count, 0)
             should_fetch = remaining_slots > 0
             if should_fetch:

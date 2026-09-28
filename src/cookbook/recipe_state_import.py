@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from sqlalchemy.exc import SQLAlchemyError
 
 from .database import create_session_factory, session_scope
-from .post_repository import create_custom_recipe
+from .post_repository import create_manual_recipe
 from .recipe_state_repository import RecipeStateConflict, save_recipe_state, valid_state
 
 
@@ -42,7 +42,7 @@ def main() -> None:
                 # Only insert if the recipe doesn't already exist
                 if session.get(Recipe, recipe_id) is None:
                     # Create and insert the custom recipe
-                    new_recipe = create_custom_recipe(custom_recipe.get("title", ""))
+                    new_recipe = create_manual_recipe(custom_recipe.get("title", ""))
                     new_recipe.id = recipe_id
                     new_recipe.image_url = custom_recipe.get("imageUrl", "")
                     new_recipe.source = custom_recipe.get("source", "unknown")

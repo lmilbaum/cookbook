@@ -36,11 +36,11 @@ from .made_date_repository import (
 from .models import Recipe, RecipeState
 from .post_import_job import import_post_by_url
 from .post_repository import (
-    create_custom_recipe,
-    delete_custom_recipe,
+    create_manual_recipe,
+    delete_manual_recipe,
     load_recipes,
     mark_not_recipe,
-    replace_custom_with_import,
+    replace_manual_with_import,
 )
 from .recipe_image_repository import load_recipe_image
 from .recipe_page_repository import load_recipe_page
@@ -379,7 +379,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
             if recipe_match:
                 recipe_id = recipe_match.group(1)
                 try:
-                    deleted = delete_custom_recipe(factory, recipe_id)
+                    deleted = delete_manual_recipe(factory, recipe_id)
                 except SQLAlchemyError:
                     self._json_response(503, {"error": "Unable to delete recipe"})
                     return
@@ -579,13 +579,13 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     self._json_response(400, {"error": "Expected a JSON object with a title"})
                     return
                 try:
-                    recipe = create_custom_recipe(title)
+                    recipe = create_manual_recipe(title)
                     with session_scope(factory) as session:
                         session.add(recipe)
                 except SQLAlchemyError:
                     self._json_response(503, {"error": "Unable to create recipe"})
                     return
-                self._json_response(201, {"id": recipe.id, "added_via": "custom"})
+                self._json_response(201, {"id": recipe.id, "added_via": "manual"})
                 try:
                     imports.refresh()
                 except (SQLAlchemyError, OSError, TypeError, ValueError):
@@ -684,12 +684,12 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                 if result is None:
                     self._json_response(503, {"error": "Failed to import post from Instagram"})
                     return
-                shortcode, source, source_name = result
+                shortcode, source, source_name, image_url = result
 
                 # If replacing a custom recipe, move its made-dates and delete it
                 if replaces and replaces != shortcode:
                     try:
-                        replace_custom_with_import(factory, replaces, shortcode)
+                        replace_manual_with_import(factory, replaces, shortcode)
                     except SQLAlchemyError:
                         pass  # Non-fatal; the new recipe is still imported
 
@@ -697,7 +697,12 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     imports.refresh()
                 except (SQLAlchemyError, OSError, TypeError, ValueError):
                     pass
-                self._json_response(200, {"id": shortcode, "source": source, "sourceName": source_name})
+                self._json_response(200, {
+                    "id": shortcode,
+                    "source": source,
+                    "sourceName": source_name,
+                    "imageUrl": image_url,
+                })
                 return
             if urlsplit(self.path).path != "/api/trello/cards":
                 self._json_response(404, {"error": "Not found"})

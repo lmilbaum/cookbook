@@ -190,7 +190,7 @@ def test_saving_existing_custom_instagram_recipe_triggers_import_and_updates_sou
     custom_recipe = Recipe(
         id=custom_id, image_url="", caption="Reel Recipe", timestamp_utc="2026-08-24T12:00:00Z",
         title="Reel Recipe", recipe_url="https://www.instagram.com/reel/SomeShortcode/",
-        recipe_name="", source="unknown", source_name="", added_via="custom",
+        recipe_name="", source="unknown", source_name="", added_via="manual",
     )
     custom_recipe.post = Post(
         shortcode=custom_id, url="https://www.instagram.com/reel/SomeShortcode/",
@@ -227,3 +227,39 @@ def test_saving_existing_custom_instagram_recipe_triggers_import_and_updates_sou
     assert not any(r["id"] == custom_id for r in saved.get("custom", []))
     assert "SomeShortcode" in saved.get("overrides", {})
     assert saved["overrides"]["SomeShortcode"]["source"] == "otherchef"
+
+
+def test_new_recipe_resolves_instagram_image_when_source_url_is_entered(page):
+    """A new manual recipe should show its Instagram image before Save and use the imported id."""
+    calls = _open_recipe_page(page, [])
+    imports = []
+    created = []
+
+    def do_import(route):
+        imports.append(route.request.post_data_json)
+        route.fulfill(json={
+            "id": "NewShortcode",
+            "source": "otherchef",
+            "sourceName": "Other Chef",
+            "imageUrl": "https://images.example/new-recipe.jpg",
+        })
+
+    page.route(f"{BASE}/api/import-instagram-url", do_import)
+    page.route(f"{BASE}/api/recipes", lambda route: (
+        created.append(route.request.post_data_json), route.fulfill(status=201, json={"id": "custom-id"})
+    ))
+    page.locator("#close-recipe-page").click()
+    page.locator("#add-recipe").click()
+    page.locator("#recipe-title").fill("New recipe")
+    page.locator("#source-url").fill("https://www.instagram.com/reels/NewShortcode/")
+
+    page.wait_for_function("document.getElementById('image-url').value !== ''")
+    assert page.locator("#image-url").input_value() == "https://images.example/new-recipe.jpg"
+    page.locator("#recipe-form button[type=submit]").click()
+    page.wait_for_function("document.getElementById('save-status').textContent !== ''")
+
+    assert imports == [{"url": "https://www.instagram.com/reels/NewShortcode/"}]
+    assert created == []
+    saved = calls["state_puts"][-1]["state"]["overrides"]["NewShortcode"]
+    assert saved["imageUrl"] == "https://images.example/new-recipe.jpg"
+    assert saved["source"] == "otherchef"

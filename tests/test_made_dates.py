@@ -106,7 +106,7 @@ def test_move_made_dates(initialized_db):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe_2)
 
@@ -142,7 +142,7 @@ def test_move_made_dates_handles_conflict(initialized_db):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe_2)
 
@@ -179,7 +179,7 @@ def test_made_dates_cascade_delete(initialized_db):
 
 
 def test_post_api_recipes_creates_custom_recipe(tmp_path):
-    """POST /api/recipes creates a custom recipe with added_via='custom' and returns 201."""
+    """POST /api/recipes creates a manual recipe with added_via='manual' and returns 201."""
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -200,7 +200,7 @@ def test_post_api_recipes_creates_custom_recipe(tmp_path):
     status, payload = responses.pop()
 
     assert status == 201
-    assert payload["added_via"] == "custom"
+    assert payload["added_via"] == "manual"
     assert "id" in payload
 
 
@@ -272,7 +272,7 @@ def test_delete_api_recipes_deletes_custom_recipe(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -368,7 +368,7 @@ def test_get_api_made_dates_returns_empty_list(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -405,7 +405,7 @@ def test_post_api_made_dates_adds_date(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -449,7 +449,7 @@ def test_post_api_made_dates_duplicate_returns_201_but_no_duplicate(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -503,7 +503,7 @@ def test_post_api_made_dates_rejects_bad_date(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -572,7 +572,7 @@ def test_delete_api_made_dates_removes_date(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -611,7 +611,7 @@ def test_delete_api_made_dates_returns_404_for_missing_date(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -648,7 +648,7 @@ def test_made_dates_full_lifecycle(tmp_path):
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 
@@ -742,7 +742,7 @@ def initialized_db():
             recipe_name="",
             source="unknown",
             source_name="",
-            added_via="custom",
+            added_via="manual",
         )
         session.add(recipe)
 

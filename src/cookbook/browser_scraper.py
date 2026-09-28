@@ -10,7 +10,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from .import_reasons import REASONS
 from .models import Post, Recipe
@@ -26,16 +26,13 @@ class IncompleteProfileError(RuntimeError):
 
 
 def _normalize_instagram_image_url(image_url: str) -> str:
-    """Remove crop/size query options so the CDN can serve a fuller image."""
+    """Preserve Instagram's complete signed image URL.
 
-    if not image_url:
-        return image_url
+    The ``stp`` transformation is part of some reel-cover signatures. Removing
+    it can return Instagram's gray video-error placeholder instead of the cover.
+    """
 
-    parsed = urlsplit(image_url)
-    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    filtered_pairs = [(key, value) for key, value in query_pairs if key != "stp"]
-    normalized_query = urlencode(filtered_pairs)
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, normalized_query, parsed.fragment))
+    return image_url
 
 
 def _extract_highest_resolution_image(page: Any) -> str:

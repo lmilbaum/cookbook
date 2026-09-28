@@ -14,12 +14,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from .browser_scraper import IncompleteProfileError, fetch_post_by_url_browser, fetch_posts_browser
 from .config import load_config, resolve_from
 
-_INSTAGRAM_MEDIA_RE = _re.compile(r"instagram\.com(/(?:p|reel)/[A-Za-z0-9_-]+)")
-from .database import create_session_factory
+_INSTAGRAM_MEDIA_RE = _re.compile(r"instagram\.com(/(?:p|reels?)/[A-Za-z0-9_-]+)")
+from .database import create_session_factory, session_scope
 from .import_service import REASON_PREFIX
 from .models import Post, Recipe
 from .post_repository import insert_missing_recipes
-from .recipe_photo_fetch import store_missing_photos
+from .recipe_photo_fetch import download_photo, store_missing_photos
+from .recipe_photo_repository import replace_recipe_photo
 
 
 def _promote_instagram_attrs(recipe: Recipe) -> None:
@@ -59,10 +60,10 @@ def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
 
 def import_post_by_url(
     root: Path, factory: sessionmaker[Session], url: str
-) -> tuple[str, str, str] | None:
+) -> tuple[str, str, str, str] | None:
     """Scrape a specific Instagram post URL and store it in the database.
 
-    Returns ``(shortcode, instagram_username, display_name)`` on success, or
+    Returns ``(shortcode, instagram_username, display_name, image_url)`` on success, or
     None if the URL is not a recognised Instagram post/reel path, the browser
     session is missing, or scraping fails.  Both ``instagram_username`` and
     ``display_name`` are empty strings when they could not be extracted.
@@ -71,7 +72,7 @@ def import_post_by_url(
     match = _INSTAGRAM_MEDIA_RE.search(url)
     if not match:
         return None
-    media_path = match.group(1).rstrip("/") + "/"
+    media_path = match.group(1).replace("/reels/", "/reel/").rstrip("/") + "/"
 
     config = load_config(root / "cookbook.toml")
     load_dotenv(resolve_from(root, config.env_file))
@@ -86,9 +87,35 @@ def import_post_by_url(
     shortcode = recipe.id
     source = recipe.source if getattr(recipe, "_instagram_username", "") else ""
     source_name = recipe.source_name if getattr(recipe, "_instagram_display_name", "") else ""
-    insert_missing_recipes(factory, [recipe])
-    store_missing_photos(factory, [recipe])
-    return shortcode, source, source_name
+    image_url = recipe.image_url
+    inserted = insert_missing_recipes(factory, [recipe])
+    if inserted:
+        store_missing_photos(factory, [recipe])
+    else:
+        with session_scope(factory) as session:
+            existing = session.get(Recipe, shortcode)
+            if existing is not None:
+                existing.image_url = recipe.image_url
+                existing.caption = recipe.caption
+                existing.timestamp_utc = recipe.timestamp_utc
+                existing.source = recipe.source
+                existing.source_name = recipe.source_name
+                existing.added_via = "instagram"
+                if existing.post is not None and recipe.post is not None:
+                    existing.post.url = recipe.post.url
+                    existing.post.typename = recipe.post.typename
+                    existing.post.is_video = recipe.post.is_video
+                    existing.post.is_recipe = True
+
+        photo_bytes = getattr(recipe, "_photo_bytes", None)
+        photo_content_type = getattr(recipe, "_photo_content_type", "image/jpeg")
+        if photo_bytes is None:
+            photo = download_photo(recipe)
+            if photo is not None:
+                photo_bytes, photo_content_type = photo
+        if photo_bytes is not None:
+            replace_recipe_photo(factory, shortcode, photo_content_type, photo_bytes)
+    return shortcode, source, source_name, image_url
 
 
 def main() -> None:

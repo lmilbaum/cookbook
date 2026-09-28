@@ -530,6 +530,9 @@ def render_html(
         const recipeUrlInput = document.getElementById("recipe-url");
         const sourceUrlInput = document.getElementById("source-url");
         const imageUrlInput = document.getElementById("image-url");
+        let resolvedInstagram = null;
+        let instagramResolution = null;
+        let instagramResolutionTimer = null;
         const ingredientsEditorBody = document.getElementById("ingredients-editor-body");
         const instructionsInput = document.getElementById("recipe-instructions");
         const typeInput = document.getElementById("recipe-type");
@@ -610,7 +613,6 @@ def render_html(
         const saveStatus = document.getElementById("save-status");
         const selectedRecipeId = new URLSearchParams(window.location.search).get("recipe");
         const baseIds = new Set(baseRecipes.map((recipe) => recipe.id));
-        const isCustom = (recipe) => recipe.added_via === "custom";
         let state;
         try {{ state = JSON.parse(localStorage.getItem(storageKey) || '{{"overrides":{{}},"custom":[]}}'); }}
         catch {{ state = {{ overrides: {{}}, custom: [] }}; }}
@@ -638,9 +640,9 @@ def render_html(
 
         // Source data owns the order of imported recipes. Preserve browser-only
         // recipes in their existing slots when the source order changes.
-        const sourceOrder = baseRecipes.filter((recipe) => !isCustom(recipe)).map((recipe) => recipe.id);
+        const sourceOrder = baseRecipes.filter((recipe) => recipe.added_via !== "manual").map((recipe) => recipe.id);
         let sourceIndex = 0;
-        const mapSourceOrder = (id) => {{ const r = baseRecipes.find((x) => x.id === id); return r && !isCustom(r) ? sourceOrder[sourceIndex++] : id; }};
+        const mapSourceOrder = (id) => {{ const r = baseRecipes.find((x) => x.id === id); return r && r.added_via !== "manual" ? sourceOrder[sourceIndex++] : id; }};
         state.order = state.order.map(mapSourceOrder);
 
         const safeLink = (value) => {{
@@ -767,16 +769,16 @@ def render_html(
         const recipeFromCard = (card) => JSON.parse(card.dataset.recipe);
         const gridCard = (id) => grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`);
         const openDialog = () => recipePage.open ? recipePage : dialog;
-        const openEditor = (recipe, isCustomRecipe, inline = false) => {{
+        const openEditor = (recipe, wasAddedManually, inline = false) => {{
           form.reset(); idInput.value = recipe.id; titleInput.value = recipe.title || ""; typeInput.value = recipeType(recipe); closeTypeList(); recipeUrlInput.value = recipe.recipeUrl || "";
           sourceUrlInput.value = recipe.sourceUrl || ""; imageUrlInput.value = recipe.imageUrl || "";
           ingredientsEditorBody.replaceChildren();
           const ingredients = normalizeIngredients(recipe.ingredients);
           (ingredients.length ? ingredients : [{{}}]).forEach(addIngredientRow);
           instructionsInput.value = recipe.instructions || "";
-          formTitle.textContent = recipe.id ? {t.js('edit_recipe')} : {t.js('add_recipe_title')}; deleteButton.hidden = !isCustomRecipe;
-          notRecipeButton.hidden = isCustomRecipe || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
-          reimportButton.hidden = !/instagram\\.com\\/(p|reel)\\//.test(recipe.sourceUrl || "");
+          formTitle.textContent = recipe.id ? {t.js('edit_recipe')} : {t.js('add_recipe_title')}; deleteButton.hidden = !wasAddedManually;
+          notRecipeButton.hidden = wasAddedManually || !recipe.sourceUrl || !hosted; saveStatus.textContent = "";
+          reimportButton.hidden = !/instagram\\.com\\/(p|reels?)\\//.test(recipe.sourceUrl || "");
           if (!inline) {{ dialog.showModal(); titleInput.focus(); }}
         }};
         const noFilterResults = document.getElementById("no-filter-results");
@@ -886,7 +888,7 @@ def render_html(
           const card = createCard(recipe); card.removeAttribute("id");
           card.append(form);
           recipePageCard.replaceChildren(card);
-          openEditor(recipe, isCustom(recipe), true);
+          openEditor(recipe, recipe.added_via === "manual", true);
           const madeSection = card.querySelector(".recipe-made-dates");
           madeSection.hidden = !hosted;
           if (hosted) {{
@@ -952,10 +954,47 @@ def render_html(
         }}
         document.getElementById("add-recipe").addEventListener("click", () => {{
           if (!hosted) return;
-          openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown", added_via: "custom" }}, true);
+          openEditor({{ id: "", title: "", recipeUrl: "", sourceUrl: "", imageUrl: "", ingredients: [], instructions: "", type: "", prerequisiteId: "", notes: "", source: "unknown", added_via: "manual" }}, true);
         }});
         document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
         document.getElementById("cancel-recipe").addEventListener("click", () => openDialog().close());
+        const resolveInstagramSource = async () => {{
+          const url = safeLink(sourceUrlInput.value.trim());
+          if (!/instagram\\.com\\/(p|reels?)\\//.test(url)) {{ resolvedInstagram = null; return null; }}
+          if (resolvedInstagram?.url === url) return resolvedInstagram.data;
+          const requestedUrl = url;
+          saveStatus.textContent = {t.js('reimport_source_loading')};
+          try {{
+            const resp = await fetch("/api/import-instagram-url", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{ url }}),
+            }});
+            if (!resp.ok) throw new Error();
+            const data = await resp.json();
+            if (safeLink(sourceUrlInput.value.trim()) !== requestedUrl) return null;
+            resolvedInstagram = {{ url: requestedUrl, data }};
+            if (data.imageUrl) imageUrlInput.value = data.imageUrl;
+            saveStatus.textContent = "";
+            return data;
+          }} catch {{
+            if (safeLink(sourceUrlInput.value.trim()) === requestedUrl) {{
+              resolvedInstagram = null;
+              saveStatus.textContent = {t.js('reimport_source_failed')};
+            }}
+            return null;
+          }}
+        }};
+        sourceUrlInput.addEventListener("input", () => {{
+          resolvedInstagram = null;
+          clearTimeout(instagramResolutionTimer);
+          if (!/instagram\\.com\\/(p|reels?)\\//.test(sourceUrlInput.value)) return;
+          instagramResolutionTimer = setTimeout(() => {{ instagramResolution = resolveInstagramSource(); }}, 400);
+        }});
+        sourceUrlInput.addEventListener("change", () => {{
+          clearTimeout(instagramResolutionTimer);
+          instagramResolution = resolveInstagramSource();
+        }});
         recipePageCard.addEventListener("input", (event) => {{
           const notes = event.target.closest(".recipe-notes textarea"); if (!notes) return;
           const card = notes.closest("[data-recipe-id]");
@@ -975,7 +1014,7 @@ def render_html(
           const button = event.target.closest(".edit-recipe"); if (!button) return;
           const card = button.closest("[data-recipe-id]");
           const recipe = recipeFromCard(card);
-          openEditor(recipe, isCustom(recipe));
+          openEditor(recipe, recipe.added_via === "manual");
         }});
         form.addEventListener("submit", async (event) => {{
           event.preventDefault();
@@ -987,28 +1026,35 @@ def render_html(
           const extraRecipeLinks = (previous.recipeUrls || [])
             .map((url, index) => ({{ url, name: (previous.recipeNames || [])[index] || recipeNameFromUrl(url) }}))
             .filter((link) => link.url !== previous.recipeUrl && link.url !== recipeUrl);
-          const isEditingCustom = existingId && isCustom(previous);
-          const recipeName = !existingId || isEditingCustom
+          const isEditingManual = existingId && previous.added_via === "manual";
+          const recipeName = !existingId || isEditingManual
             ? title
             : recipeUrl === previous.recipeUrl ? previous.recipeName || "" : recipeNameFromUrl(recipeUrl);
 
-          let recipeId = existingId;
+          if (instagramResolution) await instagramResolution;
+          const sourceUrl = safeLink(sourceUrlInput.value.trim());
+          const resolvedData = resolvedInstagram?.url === sourceUrl ? resolvedInstagram.data : null;
+          let recipeId = existingId || resolvedData?.id || "";
           if (!existingId && hosted) {{
-            try {{
-              const createResp = await fetch("/api/recipes", {{
-                method: "POST",
-                headers: {{ "Content-Type": "application/json" }},
-                body: JSON.stringify({{ title }})
-              }});
-              if (!createResp.ok) {{
+            if (recipeId) {{
+              // The source-field lookup already imported this Instagram post.
+            }} else {{
+              try {{
+                const createResp = await fetch("/api/recipes", {{
+                  method: "POST",
+                  headers: {{ "Content-Type": "application/json" }},
+                  body: JSON.stringify({{ title }})
+                }});
+                if (!createResp.ok) {{
+                  saveStatus.textContent = {t.js('recipes_save_failed')};
+                  return;
+                }}
+                const createData = await createResp.json();
+                recipeId = createData.id;
+              }} catch {{
                 saveStatus.textContent = {t.js('recipes_save_failed')};
                 return;
               }}
-              const createData = await createResp.json();
-              recipeId = createData.id;
-            }} catch {{
-              saveStatus.textContent = {t.js('recipes_save_failed')};
-              return;
             }}
           }}
 
@@ -1020,7 +1066,7 @@ def render_html(
             recipeName,
             recipeUrls: [recipeUrl, ...extraRecipeLinks.map((link) => link.url)].filter(Boolean),
             recipeNames: [recipeName, ...extraRecipeLinks.map((link) => link.name)].filter(Boolean),
-            sourceUrl: safeLink(sourceUrlInput.value.trim()),
+            sourceUrl,
             imageUrl: safeLink(imageUrlInput.value.trim()),
             ingredients: [...ingredientsEditorBody.rows].map((row) => Object.fromEntries(
               [...row.querySelectorAll("input[data-field]")].map((input) => [input.dataset.field, input.value.trim()])
@@ -1029,12 +1075,13 @@ def render_html(
             type: typeInput.value.trim() || unknownType,
             prerequisiteId: previous.prerequisiteId || "",
             notes: previous.notes || "",
-            source: previous.source || "unknown",
-            added_via: previous.added_via || "custom",
+            source: resolvedData?.source || previous.source || "unknown",
+            sourceName: resolvedData?.sourceName || previous.sourceName || "",
+            added_via: resolvedData ? "instagram" : previous.added_via || "manual",
           }};
           if (!recipe.title) return;
           await addTypeName(recipe.type);
-          const isInstagramImportable = isEditingCustom && /instagram\\.com\\/(p|reel)\\//.test(recipe.sourceUrl || "");
+          const isInstagramImportable = isEditingManual && /instagram\\.com\\/(p|reels?)\\//.test(recipe.sourceUrl || "");
           if (isInstagramImportable) {{
             const importResp = await fetch("/api/import-instagram-url", {{
               method: "POST",
@@ -1068,7 +1115,7 @@ def render_html(
           const id = idInput.value; if (!id) return;
           const card = grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`);
           const recipe = card ? recipeFromCard(card) : {{}};
-          if (!isCustom(recipe)) return;
+          if (recipe.added_via !== "manual") return;
           deleteButton.disabled = true;
           if (hosted) {{
             try {{
@@ -1114,7 +1161,7 @@ def render_html(
             const id = idInput.value;
             const body = {{ url }};
             const card = id ? grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`) : null;
-            if (card && isCustom(recipeFromCard(card))) {{
+            if (card && recipeFromCard(card).added_via === "manual") {{
               body.replaces = id;
             }}
             const resp = await fetch("/api/import-instagram-url", {{

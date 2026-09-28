@@ -75,7 +75,7 @@ def load_recipe_state(factory: sessionmaker[Session]) -> dict[str, Any]:
         order: list[str] = list(result["state"].get("order", []))
         order = [rid for rid in order if rid in all_ids]
         custom_ids = list(
-            session.scalars(select(Recipe.id).where(Recipe.added_via == "custom"))
+            session.scalars(select(Recipe.id).where(Recipe.added_via == "manual"))
         )
         order_set = set(order)
         missing = [rid for rid in custom_ids if rid not in order_set]
@@ -94,7 +94,7 @@ def save_recipe_state(factory: sessionmaker[Session], state: dict[str, Any], rev
     # Migration shim: promote old-format saves with state.custom to new format
     custom = state.get("custom", [])
     if custom:
-        from .post_repository import create_custom_recipe
+        from .post_repository import create_manual_recipe
         with session_scope(factory) as session:
             for custom_recipe in custom:
                 recipe_id = custom_recipe.get("id")
@@ -103,7 +103,7 @@ def save_recipe_state(factory: sessionmaker[Session], state: dict[str, Any], rev
                 # Only insert if the recipe doesn't already exist
                 if session.get(Recipe, recipe_id) is None:
                     # Create and insert the custom recipe
-                    new_recipe = create_custom_recipe(custom_recipe.get("title", ""))
+                    new_recipe = create_manual_recipe(custom_recipe.get("title", ""))
                     new_recipe.id = recipe_id
                     new_recipe.image_url = custom_recipe.get("imageUrl", "")
                     new_recipe.source = custom_recipe.get("source", "unknown")

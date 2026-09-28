@@ -122,7 +122,7 @@ def test_load_recipe_state_appends_custom_recipes_missing_from_order(storage):
         session.add(Recipe(
             id="custom-orphan", image_url="", caption="", timestamp_utc="2026-01-01T00:00:00Z",
             title="Orphan Recipe", recipe_url="", recipe_name="", source="unknown",
-            source_name="", added_via="custom",
+            source_name="", added_via="manual",
         ))
 
     result = load_recipe_state(storage)

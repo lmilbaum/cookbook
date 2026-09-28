@@ -20,6 +20,7 @@ from cookbook.recipe_photo_repository import (
     insert_recipe_photo,
     load_recipe_photo,
     photo_ids,
+    replace_recipe_photo,
 )
 
 
@@ -49,6 +50,14 @@ def test_photo_is_stored_once_and_never_replaced(factory) -> None:
     assert load_recipe_photo(factory, "a") == (b"first", "image/jpeg")
     assert load_recipe_photo(factory, "missing") is None
     assert photo_ids(factory) == {"a"}
+
+
+def test_explicit_photo_refresh_replaces_a_stale_copy(factory) -> None:
+    insert_recipe_photo(factory, "a", "image/png", b"placeholder")
+
+    replace_recipe_photo(factory, "a", "image/jpeg", b"correct cover")
+
+    assert load_recipe_photo(factory, "a") == (b"correct cover", "image/jpeg")
 
 
 def test_only_recipes_without_a_photo_are_downloaded(factory, monkeypatch) -> None:

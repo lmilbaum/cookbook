@@ -34,3 +34,17 @@ def insert_recipe_photo(
             return False
         session.add(RecipePhoto(recipe_id=recipe_id, content_type=content_type, data=data))
     return True
+
+
+def replace_recipe_photo(
+    factory: sessionmaker[Session], recipe_id: str, content_type: str, data: bytes
+) -> None:
+    """Store a freshly scraped photo, replacing a stale cached copy."""
+
+    with session_scope(factory) as session:
+        photo = session.get(RecipePhoto, recipe_id)
+        if photo is None:
+            session.add(RecipePhoto(recipe_id=recipe_id, content_type=content_type, data=data))
+        else:
+            photo.content_type = content_type
+            photo.data = data

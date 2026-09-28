@@ -497,7 +497,7 @@ def test_import_by_url_endpoint_returns_shortcode(tmp_path, monkeypatch) -> None
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
-    monkeypatch.setattr(server, "import_post_by_url", lambda root, fac, url: ("Dcnm2wQtTVk", "lizapanelim", "ליזה פאנלים"))
+    monkeypatch.setattr(server, "import_post_by_url", lambda root, fac, url: ("Dcnm2wQtTVk", "lizapanelim", "ליזה פאנלים", "https://images.example/post.jpg"))
     handler_type = server.make_handler(tmp_path, factory)
     handler = object.__new__(handler_type)
     responses: list[Any] = []
@@ -508,7 +508,7 @@ def test_import_by_url_endpoint_returns_shortcode(tmp_path, monkeypatch) -> None
     handler.rfile = __import__("io").BytesIO(body)
     handler.path = "/api/import-instagram-url"
     handler.do_POST()
-    assert responses.pop() == (200, {"id": "Dcnm2wQtTVk", "source": "lizapanelim", "sourceName": "ליזה פאנלים"})
+    assert responses.pop() == (200, {"id": "Dcnm2wQtTVk", "source": "lizapanelim", "sourceName": "ליזה פאנלים", "imageUrl": "https://images.example/post.jpg"})
     engine.dispose()
 
 
@@ -516,7 +516,7 @@ def test_import_by_url_endpoint_validates_request_body(tmp_path, monkeypatch) ->
     """Regression: the endpoint must reject malformed requests with 400."""
     import json
 
-    monkeypatch.setattr(server, "import_post_by_url", lambda root, fac, url: ("shortcode", "", ""))
+    monkeypatch.setattr(server, "import_post_by_url", lambda root, fac, url: ("shortcode", "", "", ""))
     handler_type = server.make_handler(tmp_path, None)
     handler = object.__new__(handler_type)
     responses: list[Any] = []
