@@ -8,9 +8,9 @@ from cookbook.site_pages import render_html
 BASE = "http://cookbook.test"
 
 
-def _recipe(recipe_id: str, title: str) -> Recipe:
+def _recipe(recipe_id: str, title: str, image_url: str = "") -> Recipe:
     recipe = Recipe(
-        id=recipe_id, image_url="", caption=title, timestamp_utc="2026-08-24T12:00:00Z",
+        id=recipe_id, image_url=image_url, caption=title, timestamp_utc="2026-08-24T12:00:00Z",
         title=title, recipe_url="", recipe_name="", source="lizapanelim",
     )
     recipe.post = Post(
@@ -38,9 +38,29 @@ def _serve(page) -> dict:
     page.route(f"{BASE}/api/recipe-types", lambda route: route.fulfill(status=201, json={"id": 1, "name": "x"})
                if route.request.method == "POST" else route.fulfill(json=[]))
     page.route(f"{BASE}/api/import-post", lambda route: route.fulfill(json={"status": "idle", "message": ""}))
+    page.route(
+        f"{BASE}/wide.svg",
+        lambda route: route.fulfill(
+            content_type="image/svg+xml",
+            body='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><rect width="400" height="100" fill="red"/></svg>',
+        ),
+    )
+    page.route(
+        f"{BASE}/tall.svg",
+        lambda route: route.fulfill(
+            content_type="image/svg+xml",
+            body='<svg xmlns="http://www.w3.org/2000/svg" width="100" height="400"><rect width="100" height="400" fill="blue"/></svg>',
+        ),
+    )
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
         content_type="text/html",
-        body=render_html([_recipe("r1", "Salad"), _recipe("r2", "Soup")], "favicon.svg")))
+        body=render_html(
+            [
+                _recipe("r1", "Salad", f"{BASE}/wide.svg"),
+                _recipe("r2", "Soup", f"{BASE}/tall.svg"),
+            ],
+            "favicon.svg",
+        )))
     return store
 
 
@@ -56,6 +76,35 @@ def test_clicking_a_recipe_opens_a_popup_over_the_home_page(page) -> None:
     assert page.locator("#recipe-title").input_value() == "Soup"
     assert popup.locator(".recipe-ingredients").is_visible()
     assert page.locator("#recipe-grid [data-recipe-id]:visible").count() == 2  # home page stays behind
+
+
+def test_recipe_images_have_identical_square_frames_in_grid_and_popup(page) -> None:
+    _serve(page)
+    page.goto(f"{BASE}/index.html")
+    images = page.locator("#recipe-grid .card-image img")
+    assert images.count() == 2
+    images.nth(1).wait_for()
+
+    grid_boxes = [images.nth(index).bounding_box() for index in range(2)]
+    assert grid_boxes[0] is not None
+    assert grid_boxes[1] is not None
+    assert grid_boxes[0]["width"] == grid_boxes[0]["height"] == 220
+    assert grid_boxes[1]["width"] == grid_boxes[1]["height"] == 220
+
+    page.set_viewport_size({"width": 200, "height": 600})
+    narrow_boxes = [images.nth(index).bounding_box() for index in range(2)]
+    assert narrow_boxes[0] is not None
+    assert narrow_boxes[1] is not None
+    assert narrow_boxes[0]["width"] == narrow_boxes[0]["height"] < 220
+    assert narrow_boxes[1]["width"] == narrow_boxes[1]["height"] < 220
+
+    page.set_viewport_size({"width": 1280, "height": 720})
+    page.locator("#recipe-grid .recipe-detail-link", has_text="Soup").click()
+    popup_image = page.locator("#recipe-page .card-image img")
+    popup_image.wait_for()
+    popup_box = popup_image.bounding_box()
+    assert popup_box is not None
+    assert popup_box["width"] == popup_box["height"] == 220
 
 
 def test_saving_closes_the_popup_and_returns_to_the_home_page(page) -> None:

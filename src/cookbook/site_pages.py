@@ -343,10 +343,10 @@ def render_html(
       .grid .recipe-made-dates,
       .grid .edit-recipe {{ display: none; }}
       .grid .card-header {{ margin-bottom: 12px; }}
-      .grid .card-image img {{ margin: 0; }}
-      .recipe-page .card-image {{ display: flex; justify-content: flex-start; }}
-      .recipe-page .card-image a {{ width: min(220px, 100%); }}
-      .recipe-page .card-image img {{ max-height: 220px; margin: 0; }}
+      .card-image {{ width: min(220px, 100%); aspect-ratio: 1 / 1; }}
+      .card-image:empty {{ display: none; }}
+      .card-image a {{ display: block; width: 100%; height: 100%; }}
+      .card-image img {{ width: 100%; height: 100%; max-height: none; margin: 0; object-fit: cover; }}
       .recipe-page .edit-recipe {{ display: none; }}
       .recipe-page .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; }}
       .recipe-page .recipe-form h2 {{ font-size: 1.05rem; }}

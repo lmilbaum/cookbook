@@ -200,7 +200,12 @@ class RenderHtmlTests(unittest.TestCase):
 
         self.assertIn('<dialog class="recipe-page" id="recipe-page">', document)
         self.assertIn('.grid .recipe-ingredients,', document)
-        self.assertIn('.recipe-page .card-image a { width: min(220px, 100%); }', document)
+        self.assertIn('.card-image { width: min(220px, 100%); aspect-ratio: 1 / 1; }', document)
+        self.assertIn('.card-image a { display: block; width: 100%; height: 100%; }', document)
+        self.assertIn(
+            '.card-image img { width: 100%; height: 100%; max-height: none; margin: 0; object-fit: cover; }',
+            document,
+        )
         self.assertIn('.recipe-page .recipe-form { margin-top: 16px;', document)
         self.assertIn('const detailUrl = `index.html?recipe=${encodeURIComponent(recipe.id)}`', document)
         self.assertIn('if (selectedRecipeId) showRecipe(selectedRecipeId, false)', document)
