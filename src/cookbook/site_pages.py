@@ -137,7 +137,6 @@ _IMPORT_POST_SCRIPT = r"""
         const controls = document.getElementById("import-controls");
         const button = document.getElementById("import-post");
         const status = document.getElementById("import-status");
-        const refresh = document.getElementById("import-refresh");
         if (!location.protocol.startsWith("http")) {
           controls.hidden = true;
           return;
@@ -172,7 +171,7 @@ _IMPORT_POST_SCRIPT = r"""
           button.disabled = result.status === "running";
           button.setAttribute("aria-busy", String(button.disabled));
           status.textContent = describe(result);
-          refresh.hidden = result.status !== "succeeded";
+          if (result.status === "succeeded") { setTimeout(() => location.reload(), 1000); }
           if (button.disabled) timer = setTimeout(check, 2000);
         };
         const check = async () => {
@@ -188,7 +187,6 @@ _IMPORT_POST_SCRIPT = r"""
         };
         button.addEventListener("click", async () => {
           button.disabled = true;
-          refresh.hidden = true;
           status.textContent = @@import_starting@@;
           try {
             const response = await fetch("/api/import-post", {
@@ -464,7 +462,6 @@ def render_html(
       </div>
       <div class="import-feedback">
         <p id="import-status" role="status" aria-live="polite"></p>
-        <a id="import-refresh" href="index.html" hidden>{t.html('import_refresh')}</a>
       </div>
       <div class="recipe-search" id="recipe-search" role="search" aria-label="{t.html('search_recipes')}">
         <label>{t.html('filter_type')} <select id="search-type"><option value="">{t.html('filter_all')}</option></select></label>
