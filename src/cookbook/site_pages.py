@@ -142,6 +142,7 @@ _IMPORT_POST_SCRIPT = r"""
           return;
         }
         let timer;
+        let wasRunning = false;
         const messages = {
           running: @@import_running@@,
           succeeded: @@import_succeeded@@,
@@ -171,7 +172,8 @@ _IMPORT_POST_SCRIPT = r"""
           button.disabled = result.status === "running";
           button.setAttribute("aria-busy", String(button.disabled));
           status.textContent = describe(result);
-          if (result.status === "succeeded") { setTimeout(() => location.reload(), 1000); }
+          if (result.status === "running") wasRunning = true;
+          if (result.status === "succeeded" && wasRunning) { setTimeout(() => location.reload(), 1000); }
           if (button.disabled) timer = setTimeout(check, 2000);
         };
         const check = async () => {
