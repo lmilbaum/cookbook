@@ -429,16 +429,38 @@ def parse_caption(caption: str) -> ParsedCaption:
             else:
                 other_lines.append(line)
 
-    # Step (e): Fallback if no headers found
+    # Step (e): Fallback if no headers found — use paragraph structure from original text.
+    # _remove_hashtags_and_filter_lines strips blank lines, so we re-split the original
+    # (post-unwrap, post-marks) text on double-newlines to recover paragraph boundaries.
     if not ingredient_lines and not instruction_lines:
-        block_start, block_end = _find_ingredient_block(lines)
-        if block_start != -1:
-            ingredient_lines = lines[block_start:block_end]
-            instruction_lines = lines[block_end:]
-        else:
-            # No ingredient block found
-            instruction_lines = lines[1:] if len(lines) > 1 else []
-            other_lines = []
+        def _para_lines(raw: str) -> list[str]:
+            result = []
+            for l in raw.splitlines():
+                l = re.sub(r"#\w+", "", l).strip()
+                if l and not re.match(r"^https?://", l):
+                    result.append(l)
+            return result
+
+        paras = [_para_lines(p) for p in re.split(r"\n{2,}", caption)]
+        paras = [p for p in paras if p]
+
+        block_idx = -1
+        for i, para in enumerate(paras):
+            candidates = [l for l in para if not re.match(r"^\s*\([^)]*\)\s*$", l)]
+            if len(candidates) < 2:
+                continue
+            strong = sum(1 for l in candidates if _is_strong_ingredient_line(l))
+            if strong / len(candidates) >= 0.5:
+                block_idx = i
+                break
+
+        if block_idx != -1:
+            ingredient_lines = paras[block_idx]
+            for para in paras[block_idx + 1:]:
+                if instruction_lines:
+                    instruction_lines.append("")
+                instruction_lines.extend(para)
+        # When no block found: only the title is extracted; leave ingredients and instructions empty.
 
     # Step (f): Parse ingredient lines
     parsed_ingredients: list[dict[str, str]] = []
