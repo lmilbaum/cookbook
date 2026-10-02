@@ -591,3 +591,77 @@ def test_recipe_photo_served_from_database_including_legacy_saved_urls(tmp_path)
         http.server_close()
         thread.join()
         engine.dispose()
+
+
+
+def test_import_by_url_returns_parsed_fields(tmp_path, monkeypatch):
+    """POST /api/import-instagram-url should return parsed caption fields if available."""
+    import io
+    import json
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from cookbook import post_import_job
+    from cookbook.database import Base, session_scope
+    from cookbook.models import Recipe, RecipeState
+
+    # Create config file
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    # Seed state at revision 1
+    with session_scope(factory) as session:
+        session.add(
+            RecipeState(id=1, revision=1, payload={"overrides": {}, "custom": []})
+        )
+
+    # Mock import_post_by_url to insert a real recipe with a caption
+    def mock_import_by_url(root, factory, url):
+        with session_scope(factory) as session:
+            recipe = Recipe(
+                id="test_shortcode",
+                image_url="https://example.com/photo.jpg",
+                caption="עוגת שוקולד\n\nמצרכים:\n2 כוסות קמח\n1 כוס סוכר\n\nאופן ההכנה:\nערבבו הכל",
+                timestamp_utc="2026-01-01T00:00:00Z",
+                source="test_user",
+                source_name="Test User",
+            )
+            session.add(recipe)
+        return "test_shortcode", "test_user", "Test User", "https://example.com/photo.jpg"
+
+    monkeypatch.setattr(post_import_job, "import_post_by_url", mock_import_by_url)
+    monkeypatch.setattr(server, "import_post_by_url", mock_import_by_url)
+
+    handler = object.__new__(server.make_handler(tmp_path, factory))
+    handler.path = "/api/import-instagram-url"
+    responses = []
+    handler._json_response = lambda status, payload: responses.append((status, payload))
+
+    body = json.dumps({"url": "https://www.instagram.com/p/test/"}).encode()
+    handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
+    handler.rfile = io.BytesIO(body)
+
+    handler.do_POST()
+
+    status, payload = responses.pop()
+    assert status == 200, f"Got {status} with payload: {payload}"
+    assert payload["id"] == "test_shortcode"
+    assert "stateRevision" in payload
+    assert "parsed" in payload
+    assert payload["parsed"].get("ingredients")  # Should have parsed ingredients
+    assert payload["stateRevision"] == 2  # Revision should be 2 (was 1, now 2)
+
+    # Verify that the page's follow-up save works
+    from cookbook.recipe_state_repository import load_recipe_state, save_recipe_state
+
+    state = load_recipe_state(factory)
+    assert state["revision"] == 2
+    # Save with revision 2 should work (no conflict)
+    new_rev = save_recipe_state(factory, state["state"], 2)
+    assert new_rev == 3
+
+    engine.dispose()

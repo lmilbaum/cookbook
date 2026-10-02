@@ -394,3 +394,84 @@ def test_import_post_by_url_returns_none_when_scraper_fails(tmp_path, monkeypatc
     )
     assert result is None
     engine.dispose()
+
+
+def test_import_next_post_fills_override_from_caption(tmp_path, monkeypatch):
+    """import_next_post should parse caption and fill recipe override."""
+    from cookbook.models import RecipeState
+    from cookbook.database import session_scope
+
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    # Seed state at revision 1
+    with session_scope(factory) as session:
+        session.add(
+            RecipeState(id=1, revision=1, payload={"overrides": {}, "custom": []})
+        )
+
+    # Mock fetch_posts_browser to return a recipe with Hebrew caption
+    def recipe_with_caption(code):
+        item = Recipe(
+            id=code,
+            image_url="",
+            caption="עוגת שוקולד\n\nמצרכים:\n2 כוסות קמח\n1 כוס סוכר\n\nאופן ההכנה:\nערבבו הכל",
+            timestamp_utc="2026-01-01",
+        )
+        item.post = Post(shortcode=code, url="https://example.com", typename="GraphImage", is_video=False)
+        return item
+
+    def fetch(username, **kwargs):
+        return [recipe_with_caption("new_recipe")]
+
+    monkeypatch.setattr(post_import_job, "fetch_posts_browser", fetch)
+    monkeypatch.setattr(post_import_job, "store_missing_photos", lambda factory, recipes: None)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+
+    imported = post_import_job.import_next_post(tmp_path, factory)
+    assert imported == 1
+
+    # Check that the state was updated with parsed fields
+    from cookbook.recipe_state_repository import load_recipe_state
+
+    state = load_recipe_state(factory)
+    assert state["revision"] == 2
+    assert "new_recipe" in state["state"]["overrides"]
+    override = state["state"]["overrides"]["new_recipe"]
+    assert override.get("title") or override.get("ingredients") or override.get("instructions")
+
+    engine.dispose()
+
+
+def test_import_next_post_caption_error_does_not_fail_import(tmp_path, monkeypatch):
+    """import_next_post should not fail if caption parsing raises an exception."""
+    (tmp_path / "cookbook.toml").write_text('username = "example"\nlimit = 1\n')
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    # Mock fetch_posts_browser to return a recipe
+    def recipe(code):
+        item = Recipe(id=code, image_url="", caption="test", timestamp_utc="2026-01-01")
+        item.post = Post(shortcode=code, url="https://example.com", typename="GraphImage", is_video=False)
+        return item
+
+    def fetch(username, **kwargs):
+        return [recipe("test_recipe")]
+
+    # Mock populate_recipe_from_caption to raise an exception
+    def raise_error(*args, **kwargs):
+        raise Exception("Simulated parsing error")
+
+    monkeypatch.setattr(post_import_job, "fetch_posts_browser", fetch)
+    monkeypatch.setattr(post_import_job, "store_missing_photos", lambda factory, recipes: None)
+    monkeypatch.setattr(post_import_job, "load_dotenv", lambda *args: None)
+    monkeypatch.setattr(post_import_job, "populate_recipe_from_caption", raise_error)
+
+    # Should still return 1 (successful import) even though parsing failed
+    imported = post_import_job.import_next_post(tmp_path, factory)
+    assert imported == 1
+
+    engine.dispose()

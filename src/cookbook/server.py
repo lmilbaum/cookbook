@@ -34,7 +34,7 @@ from .made_date_repository import (
     remove_made_date,
 )
 from .models import Recipe, RecipeState
-from .post_import_job import import_post_by_url
+from .post_import_job import import_post_by_url, populate_recipe_from_caption
 from .post_repository import (
     create_manual_recipe,
     delete_manual_recipe,
@@ -694,15 +694,24 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                         pass  # Non-fatal; the new recipe is still imported
 
                 try:
+                    filled = populate_recipe_from_caption(factory, shortcode)
+                except Exception:
+                    filled = None
+
+                try:
                     imports.refresh()
                 except (SQLAlchemyError, OSError, TypeError, ValueError):
                     pass
-                self._json_response(200, {
+                response = {
                     "id": shortcode,
                     "source": source,
                     "sourceName": source_name,
                     "imageUrl": image_url,
-                })
+                }
+                if filled is not None:
+                    response["stateRevision"] = filled[0]
+                    response["parsed"] = filled[1]
+                self._json_response(200, response)
                 return
             if urlsplit(self.path).path != "/api/trello/cards":
                 self._json_response(404, {"error": "Not found"})

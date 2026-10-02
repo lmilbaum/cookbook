@@ -125,3 +125,69 @@ def save_recipe_state(factory: sessionmaker[Session], state: dict[str, Any], rev
             row.revision += 1
             row.payload = state
     return revision + 1
+
+
+def fill_recipe_override(
+    factory: sessionmaker[Session],
+    recipe_id: str,
+    fields: dict[str, Any],
+    attempts: int = 3,
+) -> tuple[int, dict[str, Any]] | None:
+    """
+    Fill a recipe override with parsed caption fields, retrying on conflicts.
+
+    Returns (new_revision, written_fields) on success, or None if revision == 0 or all retries exhausted.
+
+    Only writes non-empty fields:
+    - String: blank if missing, empty, all-whitespace, or matches stale title wrapper pattern
+    - List: blank if missing or empty
+    """
+    import re
+
+    stale_title_pattern = re.compile(r"[\d.,]+[KkMm]?\s*likes?")
+
+    for _ in range(attempts):
+        current = load_recipe_state(factory)
+        if current["revision"] == 0:
+            return None
+
+        state = {
+            "overrides": dict(current["state"].get("overrides", {})),
+            "custom": list(current["state"].get("custom", [])),
+        }
+        if "order" in current["state"]:
+            state["order"] = list(current["state"]["order"])
+        if "types" in current["state"]:
+            state["types"] = list(current["state"]["types"])
+
+        existing = state["overrides"].get(recipe_id, {})
+        written: dict[str, Any] = {}
+
+        for key, value in fields.items():
+            existing_value = existing.get(key)
+            if isinstance(value, list):
+                # Only write non-empty lists when existing value is blank
+                if not existing_value:
+                    written[key] = value
+            else:
+                # Only write non-blank, non-stale strings when existing value is blank
+                ev = str(existing_value or "").strip()
+                if not ev or stale_title_pattern.search(ev):
+                    # Existing is blank or stale; check if new value is non-blank and non-stale
+                    is_blank = not value or not value.strip()
+                    is_stale = stale_title_pattern.search(value) if value else False
+                    if not is_blank and not is_stale:
+                        written[key] = value
+
+        if not written:
+            return None
+
+        state["overrides"][recipe_id] = {**existing, "id": recipe_id, **written}
+
+        try:
+            new_rev = save_recipe_state(factory, state, current["revision"])
+            return new_rev, written
+        except RecipeStateConflict:
+            continue
+
+    return None

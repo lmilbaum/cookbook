@@ -33,6 +33,25 @@ def _promote_instagram_attrs(recipe: Recipe) -> None:
         recipe.source_name = source_name
 
 
+def populate_recipe_from_caption(
+    factory: sessionmaker[Session], recipe_id: str
+) -> tuple[int, dict] | None:
+    """Extract metadata from a recipe's caption and populate the override."""
+    from .caption_parser import parse_caption
+    from .recipe_state_repository import fill_recipe_override
+
+    with factory() as session:
+        recipe = session.get(Recipe, recipe_id)
+        if recipe is None:
+            return None
+        caption = recipe.caption
+
+    fields = parse_caption(caption).as_override()
+    if not fields:
+        return None
+    return fill_recipe_override(factory, recipe_id, fields)
+
+
 def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
     """Skip every stored post, including hidden posts, and import one candidate."""
     config = load_config(root / "cookbook.toml")
@@ -51,10 +70,21 @@ def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
     ][:1]
     if not recipes:
         return 0
+    # Capture IDs before session operations expire mapped attrs
+    ids = [r.id for r in recipes]
     for recipe in recipes:
         _promote_instagram_attrs(recipe)
     imported = insert_missing_recipes(factory, recipes)
     store_missing_photos(factory, recipes)
+    if imported > 0:
+        for recipe_id in ids:
+            try:
+                populate_recipe_from_caption(factory, recipe_id)
+            except Exception as error:
+                print(
+                    f"Caption parsing skipped for {recipe_id}: {type(error).__name__}",
+                    file=sys.stderr,
+                )
     return imported
 
 

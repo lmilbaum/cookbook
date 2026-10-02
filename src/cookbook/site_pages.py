@@ -957,6 +957,14 @@ def render_html(
         }});
         document.getElementById("add-ingredient").addEventListener("click", () => addIngredientRow());
         document.getElementById("cancel-recipe").addEventListener("click", () => openDialog().close());
+        const adoptImportedFields = async (data) => {{
+          if (!data?.stateRevision) return {{}};
+          await pendingSave;
+          if (data?.stateRevision !== revision + 1) return {{}};
+          state.overrides[data.id] = {{...state.overrides[data.id], ...data.parsed}};
+          revision = data.stateRevision;
+          return data.parsed || {{}};
+        }};
         const resolveInstagramSource = async () => {{
           const url = safeLink(sourceUrlInput.value.trim());
           if (!/instagram\\.com\\/(p|reels?)\\//.test(url)) {{ resolvedInstagram = null; return null; }}
@@ -972,6 +980,15 @@ def render_html(
             if (!resp.ok) throw new Error();
             const data = await resp.json();
             if (safeLink(sourceUrlInput.value.trim()) !== requestedUrl) return null;
+            const parsed = await adoptImportedFields(data);
+            if (parsed.title && !titleInput.value.trim()) titleInput.value = parsed.title;
+            if (parsed.ingredients?.length && !ingredientsEditorBody.rows?.length) {{
+              for (const ingredient of parsed.ingredients) {{
+                const row = ingredientsEditorBody.insertRow();
+                row.innerHTML = `<td><input data-field="name" type="text" value="${{html(ingredient.name)}}"></td><td><input data-field="amount" type="text" value="${{html(ingredient.amount)}}"></td><td><input data-field="varieties" type="text" value="${{html(ingredient.varieties)}}"></td><td><button type="button" class="remove-ingredient-row" aria-label="{t.js('remove_ingredient')}">✕</button></td>`;
+              }}
+            }}
+            if (parsed.instructions && !instructionsInput.value.trim()) instructionsInput.value = parsed.instructions;
             resolvedInstagram = {{ url: requestedUrl, data }};
             if (data.imageUrl) imageUrlInput.value = data.imageUrl;
             saveStatus.textContent = "";
@@ -1089,9 +1106,13 @@ def render_html(
             }});
             if (importResp.ok) {{
               const importData = await importResp.json();
+              const parsed = await adoptImportedFields(importData);
               recipe.id = importData.id;
               recipe.source = importData.source || recipe.source;
               recipe.sourceName = importData.sourceName || "";
+              if (parsed.ingredients?.length && !recipe.ingredients?.length) recipe.ingredients = parsed.ingredients;
+              if (parsed.instructions && !recipe.instructions) recipe.instructions = parsed.instructions;
+              if (parsed.title && !recipe.title) recipe.title = parsed.title;
               state.overrides[recipe.id] = recipe;
               const oldIdx = state.order.indexOf(existingId);
               if (oldIdx !== -1) state.order.splice(oldIdx, 1, recipe.id);
@@ -1170,8 +1191,9 @@ def render_html(
             }});
             if (!resp.ok) throw new Error();
             const data = await resp.json();
+            const parsed = await adoptImportedFields(data);
             const existingRecipe = id ? recipeFromCard(grid.querySelector(`[data-recipe-id="${{CSS.escape(id)}}"]`)) : {{}};
-            const updated = {{ ...existingRecipe, id: data.id, source: data.source || "unknown", sourceName: data.sourceName || "" }};
+            const updated = {{ ...existingRecipe, ...parsed, id: data.id, source: data.source || "unknown", sourceName: data.sourceName || "" }};
             state.overrides[data.id] = updated;
             if (!state.order.includes(data.id)) state.order.push(data.id);
             save(saveStatus);

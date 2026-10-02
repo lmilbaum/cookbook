@@ -142,3 +142,109 @@ def test_recipes_saved_from_the_page_are_valid():
     assert valid_state({"overrides": {"r1": recipe}, "custom": []})
     assert valid_state({"overrides": {}, "custom": [recipe]})
     assert not valid_state({"overrides": {"r1": {**recipe, "source": 1}}, "custom": []})
+
+
+def test_fill_recipe_override_fills_missing_fields(storage):
+    """fill_recipe_override should fill only blank fields in an override."""
+    from cookbook.recipe_state_repository import fill_recipe_override
+
+    # Seed initial state with revision 1
+    from cookbook.database import session_scope
+
+    with session_scope(storage) as session:
+        session.add(
+            RecipeState(
+                id=1,
+                revision=1,
+                payload={"overrides": {}, "custom": []},
+            )
+        )
+
+    fields = {"title": "Test Title", "ingredients": [{"name": "Salt", "amount": "1 tsp", "varieties": ""}]}
+    result = fill_recipe_override(storage, "recipe1", fields)
+
+    assert result is not None
+    new_rev, written = result
+    assert new_rev == 2
+    assert "title" in written
+    assert "ingredients" in written
+
+
+def test_fill_recipe_override_keeps_non_empty_user_fields(storage):
+    """fill_recipe_override should keep existing user-provided fields."""
+    from cookbook.recipe_state_repository import fill_recipe_override
+
+    from cookbook.database import session_scope
+
+    with session_scope(storage) as session:
+        session.add(
+            RecipeState(
+                id=1,
+                revision=1,
+                payload={
+                    "overrides": {
+                        "recipe1": {"id": "recipe1", "title": "User Title", "notes": "User Notes"}
+                    },
+                    "custom": [],
+                },
+            )
+        )
+
+    fields = {"title": "New Title", "instructions": "New Instructions"}
+    result = fill_recipe_override(storage, "recipe1", fields)
+
+    assert result is not None
+    new_rev, written = result
+    # Only fill blank fields, so title should not be in written (already user-provided)
+    # instructions should be filled
+    assert "instructions" in written
+    # Title must not be overwritten since it already has a user-provided value
+    assert "title" not in written
+
+    # Verify that persisted state still has the original user title
+    persisted = load_recipe_state(storage)
+    assert persisted["state"]["overrides"]["recipe1"]["title"] == "User Title"
+
+
+def test_fill_recipe_override_returns_none_on_revision_zero(storage):
+    """fill_recipe_override should return None if revision is 0 (no state record)."""
+    from cookbook.recipe_state_repository import fill_recipe_override
+
+    # No state record → revision 0
+    fields = {"title": "Test Title"}
+    result = fill_recipe_override(storage, "recipe1", fields)
+
+    assert result is None
+
+
+def test_fill_recipe_override_retries_on_conflict(storage, monkeypatch):
+    """fill_recipe_override should retry after RecipeStateConflict."""
+    from cookbook.recipe_state_repository import fill_recipe_override, save_recipe_state, RecipeStateConflict
+
+    from cookbook.database import session_scope
+
+    with session_scope(storage) as session:
+        session.add(
+            RecipeState(
+                id=1,
+                revision=1,
+                payload={"overrides": {}, "custom": []},
+            )
+        )
+
+    call_count = [0]
+    original_save = save_recipe_state
+
+    def save_with_conflict_once(factory, state, revision):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise RecipeStateConflict("Simulated conflict")
+        return original_save(factory, state, revision)
+
+    monkeypatch.setattr("cookbook.recipe_state_repository.save_recipe_state", save_with_conflict_once)
+
+    fields = {"title": "Test Title"}
+    result = fill_recipe_override(storage, "recipe1", fields, attempts=3)
+
+    assert result is not None
+    assert call_count[0] == 2  # Failed once, succeeded on retry

@@ -26,7 +26,9 @@ def test_import_button_starts_once_and_shows_completion(page):
     page.wait_for_function("document.getElementById('import-status').textContent.startsWith('Finding the oldest post')")
     assert button.is_disabled()
     state.update(status='succeeded', code='succeeded', message='English fallback')
-    page.locator('#import-refresh').wait_for(state='visible')
+    # Wait for the page to reload after the import succeeds (1000ms timeout + some margin)
+    page.wait_for_timeout(2000)
+    button = page.get_by_role('button', name='Import next post from the end')
     assert not button.is_disabled()
     assert calls.count('POST') == 1
     assert page.url == 'http://cookbook.test/index.html'
