@@ -468,6 +468,13 @@ def render_html(
       <div class="recipe-search" id="recipe-search" role="search" aria-label="{t.html('search_recipes')}">
         <label>{t.html('filter_type')} <select id="search-type"><option value="">{t.html('filter_all')}</option></select></label>
         <label>{t.html('filter_source')} <select id="search-source"><option value="">{t.html('filter_all')}</option></select></label>
+        <label id="search-made-control" hidden>
+          <select id="search-made" disabled>
+            <option value="all">{t.html('filter_all')}</option>
+            <option value="made">{t.html('filter_made')}</option>
+            <option value="not_made">{t.html('filter_not_made')}</option>
+          </select>
+        </label>
       </div>
       <section class=\"grid\" id=\"recipe-grid\"></section>
       <p class="no-filter-results" id="no-filter-results" hidden>{t.html('no_filter_results')}</p>
@@ -784,6 +791,8 @@ def render_html(
         const searchForm = document.getElementById("recipe-search");
         const searchType = document.getElementById("search-type");
         const searchSource = document.getElementById("search-source");
+        const searchMade = document.getElementById("search-made");
+        const madeRecipeIds = new Set();
         const refreshTypeOptions = () => {{
           const types = knownTypes("");
           const selected = searchType.value;
@@ -817,7 +826,10 @@ def render_html(
           grid.querySelectorAll("[data-recipe-id]").forEach((card) => {{
             const recipe = recipeFromCard(card);
             const visible = (!criteria.type || recipeType(recipe) === criteria.type)
-              && (!criteria.source || recipeEffectiveSource(recipe) === criteria.source);
+              && (!criteria.source || recipeEffectiveSource(recipe) === criteria.source)
+              && (searchMade.value === "all"
+                  || (searchMade.value === "made" && madeRecipeIds.has(recipe.id))
+                  || (searchMade.value === "not_made" && !madeRecipeIds.has(recipe.id)));
             card.hidden = !visible;
             if (visible) anyVisible = true;
           }});
@@ -828,6 +840,20 @@ def render_html(
         state.order.forEach((id) => {{ const recipe = recipesById.get(id); if (recipe) grid.append(createCard(recipe)); }});
         grid.querySelectorAll("[data-recipe-id]").forEach((card) => updateCard(card, recipeFromCard(card)));
         applySourceFilter();
+        if (hosted) {{
+          document.getElementById("search-made-control").hidden = false;
+          fetch("/api/made-recipes", {{ cache: "no-store" }})
+            .then((resp) => {{
+              if (!resp.ok) throw new Error();
+              return resp.json();
+            }})
+            .then((data) => {{
+              data.recipe_ids?.forEach((id) => madeRecipeIds.add(id));
+              searchMade.disabled = false;
+              applySourceFilter();
+            }})
+            .catch(() => {{}});
+        }}
         // Recipes open in a popup over the home page; the grid card stays the source of truth.
         let pushedRecipeUrl = false;
         const localToday = () => {{
@@ -849,6 +875,9 @@ def render_html(
             const resp = await fetch(`/api/recipes/${{encodeURIComponent(recipeId)}}/made-dates`);
             if (!resp.ok) throw new Error();
             const data = await resp.json();
+            if (data.dates.length) madeRecipeIds.add(recipeId);
+            else madeRecipeIds.delete(recipeId);
+            applySourceFilter();
             if (!data.dates.length) {{
               const item = document.createElement("li");
               item.textContent = {t.js('made_never')};

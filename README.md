@@ -29,6 +29,14 @@ already be configured in the local `.env`; login challenges may still require
 restoring a valid session. This button is available only on the hosted cookbook.
 Opening a page never starts an import.
 
+## Recipes I made
+
+Track which recipes you have prepared. Click **סימון כהוכן** (Mark as made) in a
+recipe's popup to record the date you made it. Use the dropdown filter in the
+recipe search bar to view only recipes you've made, only recipes you haven't made
+yet, or all recipes. The filter is available only on the hosted cookbook. Filter
+selection is not saved; it resets to "All" when you reload the page.
+
 ## Interface language
 
 The generated pages are Hebrew (`<html lang="he" dir="rtl">`). All interface

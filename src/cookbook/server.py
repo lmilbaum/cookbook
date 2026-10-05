@@ -30,6 +30,7 @@ from .import_service import ImportService
 from .made_date_repository import (
     add_made_date,
     list_made_dates,
+    made_recipe_ids,
     parse_made_on,
     remove_made_date,
 )
@@ -447,6 +448,16 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                 self._json_response(200, {"dates": dates})
                 return
 
+            # GET /api/made-recipes
+            if request_path == "/api/made-recipes":
+                try:
+                    ids = made_recipe_ids(factory)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to read made recipes"})
+                    return
+                self._json_response(200, {"recipe_ids": ids})
+                return
+
             recipe_image_match = _RECIPE_IMAGE_PATH.fullmatch(request_path)
             recipe_photo_match = _RECIPE_PHOTO_PATH.fullmatch(request_path) or _LEGACY_PHOTO_PATH.fullmatch(request_path)
             if recipe_image_match or recipe_photo_match:
@@ -695,7 +706,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
 
                 try:
                     filled = populate_recipe_from_caption(factory, shortcode)
-                except Exception:
+                except SQLAlchemyError:
                     filled = None
 
                 try:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -61,3 +62,10 @@ def move_made_dates(session: Session, from_id: str, to_id: str) -> None:
         if existing is None:
             session.add(RecipeMadeDate(recipe_id=to_id, made_on=row.made_on))
         session.delete(row)
+
+
+def made_recipe_ids(factory: sessionmaker[Session]) -> list[str]:
+    """Return the distinct recipe_ids for recipes that have been made at least once."""
+    with factory() as session:
+        ids = session.scalars(select(RecipeMadeDate.recipe_id).distinct().order_by(RecipeMadeDate.recipe_id)).all()
+        return list(ids)

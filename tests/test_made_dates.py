@@ -7,7 +7,8 @@ import json
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from cookbook import server
@@ -15,9 +16,9 @@ from cookbook.database import Base, session_scope
 from cookbook.made_date_repository import (
     add_made_date,
     list_made_dates,
+    move_made_dates,
     parse_made_on,
     remove_made_date,
-    move_made_dates,
 )
 from cookbook.models import Recipe
 
@@ -223,7 +224,7 @@ def test_post_api_recipes_accepts_extra_fields(tmp_path):
     handler.rfile = io.BytesIO(body)
 
     handler.do_POST()
-    status, payload = responses.pop()
+    status, _ = responses.pop()
 
     # Should still succeed - the server accepts extra fields
     assert status == 201
@@ -713,6 +714,128 @@ def test_made_dates_full_lifecycle(tmp_path):
     handler.do_DELETE()
     status, payload = responses.pop()
     assert status == 404
+    assert "error" in payload
+
+
+def test_made_recipe_ids_lists_each_made_recipe_once(initialized_db):
+    """made_recipe_ids returns each recipe with a made date exactly once."""
+    from cookbook.made_date_repository import made_recipe_ids
+
+    factory, recipe_id_1 = initialized_db
+
+    # Create a second recipe
+    with session_scope(factory) as session:
+        recipe_id_2 = "recipe-2"
+        recipe_2 = Recipe(
+            id=recipe_id_2,
+            image_url="",
+            caption="",
+            timestamp_utc="2026-09-01T00:00:00Z",
+            title="Recipe 2",
+            recipe_url="",
+            recipe_name="",
+            source="unknown",
+            source_name="",
+            added_via="manual",
+        )
+        session.add(recipe_2)
+
+    # Add two dates to first recipe (should appear only once)
+    add_made_date(factory, recipe_id_1, date(2026, 9, 1))
+    add_made_date(factory, recipe_id_1, date(2026, 9, 20))
+
+    # Second recipe has no dates
+    assert made_recipe_ids(factory) == [recipe_id_1]
+
+
+def test_made_recipe_ids_drops_recipe_after_last_date_removed(initialized_db):
+    """made_recipe_ids stops listing a recipe after its last date is removed."""
+    from cookbook.made_date_repository import made_recipe_ids
+
+    factory, recipe_id = initialized_db
+
+    made_on = date(2026, 9, 27)
+    add_made_date(factory, recipe_id, made_on)
+    assert made_recipe_ids(factory) == [recipe_id]
+
+    # Remove the date
+    remove_made_date(factory, recipe_id, made_on)
+    assert made_recipe_ids(factory) == []
+
+
+def test_get_api_made_recipes_returns_made_recipe_ids(tmp_path):
+    """GET /api/made-recipes returns recipe_ids for recipes with made dates."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    # Create two recipes
+    with session_scope(factory) as session:
+        recipe_1 = Recipe(
+            id="recipe-1",
+            image_url="",
+            caption="",
+            timestamp_utc="2026-09-01T00:00:00Z",
+            title="Recipe 1",
+            recipe_url="",
+            recipe_name="",
+            source="unknown",
+            source_name="",
+            added_via="manual",
+        )
+        recipe_2 = Recipe(
+            id="recipe-2",
+            image_url="",
+            caption="",
+            timestamp_utc="2026-09-01T00:00:00Z",
+            title="Recipe 2",
+            recipe_url="",
+            recipe_name="",
+            source="unknown",
+            source_name="",
+            added_via="manual",
+        )
+        session.add(recipe_1)
+        session.add(recipe_2)
+
+    # Give recipe-2 a made date
+    add_made_date(factory, "recipe-2", date(2026, 9, 27))
+
+    handler = object.__new__(server.make_handler(tmp_path, factory))
+    handler.path = "/api/made-recipes"
+    responses = []
+    handler._json_response = lambda status, payload: responses.append((status, payload))
+
+    handler.do_GET()
+    status, payload = responses.pop()
+
+    assert status == 200
+    assert payload == {"recipe_ids": ["recipe-2"]}
+
+
+def test_get_api_made_recipes_returns_503_on_db_error(tmp_path, monkeypatch):
+    """GET /api/made-recipes returns 503 on database error."""
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    handler = object.__new__(server.make_handler(tmp_path, factory))
+    handler.path = "/api/made-recipes"
+    responses = []
+    handler._json_response = lambda status, payload: responses.append((status, payload))
+
+    # Monkeypatch made_recipe_ids to raise SQLAlchemyError
+    monkeypatch.setattr(
+        server,
+        "made_recipe_ids",
+        lambda factory: (_ for _ in ()).throw(SQLAlchemyError()),
+    )
+
+    handler.do_GET()
+    status, payload = responses.pop()
+
+    assert status == 503
     assert "error" in payload
 
 

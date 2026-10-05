@@ -345,3 +345,26 @@ def test_empty_image_override_does_not_hide_stored_photo() -> None:
 
     # Verify the fallback logic is in place: image override that is empty should fall back to recipe's stored URL
     assert "imageUrl: state.overrides[recipe.id]?.imageUrl || recipe.imageUrl" in document
+
+
+def test_made_filter_is_present_in_the_recipe_grid() -> None:
+    """The made filter dropdown is rendered and has the necessary JavaScript."""
+    document = render_html([make_recipe()], "favicon.svg")
+
+    # Check that the made filter select and label are present
+    assert 'id="search-made-control" hidden' in document
+    assert 'id="search-made" disabled' in document
+    assert 'value="all"' in document.split('id="search-made"')[1].split('</select>')[0]
+    assert 'value="made"' in document.split('id="search-made"')[1].split('</select>')[0]
+    assert 'value="not_made"' in document.split('id="search-made"')[1].split('</select>')[0]
+
+    # Check for Hebrew labels
+    assert "מתכונים שהכנתי" in document  # filter_made
+    assert "מתכונים שלא הכנתי" in document  # filter_not_made
+
+    # Check that the JavaScript sets up the made filter
+    assert "const searchMade = document.getElementById(\"search-made\")" in document
+    assert "const madeRecipeIds = new Set()" in document
+    assert "madeRecipeIds.has(recipe.id)" in document
+    assert 'fetch("/api/made-recipes"' in document
+    assert "searchMade.disabled = false" in document
