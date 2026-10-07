@@ -45,7 +45,7 @@ _HEBREW: dict[str, str] = {
     "filter_type": "סוג",
     "filter_source": "מקור",
     "filter_all": "הכל",
-    "filter_made_label": "הכנה",
+    "filter_made_label": "הכנתי",
     "filter_made": "מתכונים שהכנתי",
     "filter_not_made": "מתכונים שלא הכנתי",
     "source_unknown": "לא ידוע",
