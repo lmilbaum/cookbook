@@ -468,8 +468,7 @@ def render_html(
       <div class="recipe-search" id="recipe-search" role="search" aria-label="{t.html('search_recipes')}">
         <label>{t.html('filter_type')} <select id="search-type"><option value="">{t.html('filter_all')}</option></select></label>
         <label>{t.html('filter_source')} <select id="search-source"><option value="">{t.html('filter_all')}</option></select></label>
-        <label id="search-made-control" hidden>
-          <select id="search-made" disabled>
+        <label id="search-made-control" hidden>{t.html('filter_made_label')} <select id="search-made" disabled>
             <option value="all">{t.html('filter_all')}</option>
             <option value="made">{t.html('filter_made')}</option>
             <option value="not_made">{t.html('filter_not_made')}</option>
