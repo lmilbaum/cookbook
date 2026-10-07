@@ -359,8 +359,8 @@ def test_made_filter_is_present_in_the_recipe_grid() -> None:
     assert 'value="not_made"' in document.split('id="search-made"')[1].split('</select>')[0]
 
     # Check for Hebrew labels
-    assert "מתכונים שהכנתי" in document  # filter_made
-    assert "מתכונים שלא הכנתי" in document  # filter_not_made
+    assert "כן" in document  # filter_made
+    assert "לא" in document  # filter_not_made
 
     # Check that the JavaScript sets up the made filter
     assert "const searchMade = document.getElementById(\"search-made\")" in document
