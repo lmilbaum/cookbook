@@ -191,3 +191,26 @@ def fill_recipe_override(
             continue
 
     return None
+
+
+def image_url_overrides(state: dict[str, Any]) -> dict[str, str]:
+    """Return override image URLs that point at downloadable http(s) addresses."""
+
+    result: dict[str, str] = {}
+    for recipe_id, override in state.get("overrides", {}).items():
+        if not isinstance(override, dict):
+            continue
+        url = str(override.get("imageUrl", "")).strip()
+        if url.startswith(("http://", "https://")):
+            result[recipe_id] = url
+    return result
+
+
+def override_image_urls(factory: sessionmaker[Session]) -> dict[str, str]:
+    """Return the downloadable override image URLs saved in the database."""
+
+    with factory() as session:
+        row = session.get(RecipeState, 1)
+        if row is None:
+            return {}
+        return image_url_overrides(row.payload)

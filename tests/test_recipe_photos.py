@@ -13,9 +13,10 @@ from sqlalchemy.orm import sessionmaker
 
 from cookbook import main as cli
 from cookbook import recipe_photo_fetch, recipe_photo_import
-from cookbook.database import Base
+from cookbook.database import Base, session_scope
 from cookbook.models import Post, Recipe, RecipePhoto
 from cookbook.post_repository import load_recipes
+from cookbook.recipe_photo_fetch import PhotoBackfill
 from cookbook.recipe_photo_repository import (
     insert_recipe_photo,
     load_recipe_photo,
@@ -244,3 +245,100 @@ def test_migration_creates_the_table_the_model_expects() -> None:
     columns = {column["name"] for column in inspect(engine).get_columns("recipe_photos")}
     assert columns == {column.name for column in RecipePhoto.__table__.columns}
     engine.dispose()
+
+
+def test_backfill_downloads_manual_recipe_override_image_url(factory, monkeypatch) -> None:
+    # A manual recipe with an external imageUrl in state.overrides should get its photo cached.
+    recipe = Recipe(id="custom-1", image_url="", caption="", timestamp_utc="2026-01-01", added_via="manual")
+    with session_scope(factory) as s:
+        s.add(recipe)
+    from cookbook.recipe_state_repository import save_recipe_state
+    save_recipe_state(factory, {
+        "overrides": {"custom-1": {"id": "custom-1", "imageUrl": "https://cdn.example/a.png"}},
+        "custom": [],
+    }, 0)
+
+    downloaded = []
+    def fake_download(r):
+        downloaded.append(r.image_url)
+        return (b"img", "image/png")
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", fake_download)
+
+    refreshed = []
+    backfill = PhotoBackfill(factory, lambda: refreshed.append(1))
+    count = backfill.run_once()
+
+    assert count == 1
+    assert downloaded == ["https://cdn.example/a.png"]
+    assert load_recipe_photo(factory, "custom-1") == (b"img", "image/png")
+    assert refreshed
+
+
+def test_backfill_retries_failed_download_after_backoff(factory, monkeypatch) -> None:
+    recipe = Recipe(id="r1", image_url="https://cdn.example/r1.jpg", caption="", timestamp_utc="2026-01-01")
+    with session_scope(factory) as s:
+        s.add(recipe)
+
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", lambda r: None)
+    clock = [0.0]
+    backfill = PhotoBackfill(factory, lambda: None, clock=lambda: clock[0], initial_retry=100.0)
+    backfill.run_once()  # fails, sets backoff
+
+    # Should NOT retry while still in backoff window
+    calls = []
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", lambda r: (calls.append(r) or (b"ok", "image/jpeg")))
+    backfill.run_once()
+    assert not calls
+
+    # Advance past the backoff
+    clock[0] = 200.0
+    backfill.run_once()
+    assert calls
+
+
+def test_backfill_never_replaces_stored_photo_without_request(factory, monkeypatch) -> None:
+    insert_recipe_photo(factory, "r1", "image/jpeg", b"original")
+    recipe = Recipe(id="r1", image_url="https://cdn.example/r1.jpg", caption="", timestamp_utc="2026-01-01")
+    with session_scope(factory) as s:
+        s.add(recipe)
+
+    calls = []
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", lambda r: calls.append(r) or (b"new", "image/jpeg"))
+    backfill = PhotoBackfill(factory, lambda: None)
+    backfill.run_once()
+
+    assert not calls
+    assert load_recipe_photo(factory, "r1") == (b"original", "image/jpeg")
+
+
+def test_backfill_replacement_overwrites_only_on_successful_download(factory, monkeypatch) -> None:
+    insert_recipe_photo(factory, "r1", "image/jpeg", b"old")
+    recipe = Recipe(id="r1", image_url="https://cdn.example/r1.jpg", caption="", timestamp_utc="2026-01-01")
+    with session_scope(factory) as s:
+        s.add(recipe)
+
+    # First: request replacement with a failing download
+    monkeypatch.setattr(recipe_photo_fetch, "download_image_url", lambda url: None)
+    backfill = PhotoBackfill(factory, lambda: None)
+    backfill.request_replacements({"r1": "https://cdn.example/new.jpg"})
+    backfill.run_once()
+    assert load_recipe_photo(factory, "r1") == (b"old", "image/jpeg")
+
+    # Second: successful download replaces
+    monkeypatch.setattr(recipe_photo_fetch, "download_image_url", lambda url: (b"new", "image/jpeg"))
+    backfill.request_replacements({"r1": "https://cdn.example/new.jpg"})
+    backfill.run_once()
+    assert load_recipe_photo(factory, "r1") == (b"new", "image/jpeg")
+
+
+def test_backfill_caps_downloads_per_pass(factory, monkeypatch) -> None:
+    for i in range(3):
+        r = Recipe(id=f"r{i}", image_url=f"https://cdn.example/r{i}.jpg", caption="", timestamp_utc="2026-01-01")
+        with session_scope(factory) as s:
+            s.add(r)
+
+    calls = []
+    monkeypatch.setattr(recipe_photo_fetch, "download_photo", lambda r: (calls.append(r) or (b"x", "image/jpeg")))
+    backfill = PhotoBackfill(factory, lambda: None, max_per_pass=2)
+    backfill.run_once()
+    assert len(calls) == 2

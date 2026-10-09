@@ -248,3 +248,62 @@ def test_fill_recipe_override_retries_on_conflict(storage, monkeypatch):
 
     assert result is not None
     assert call_count[0] == 2  # Failed once, succeeded on retry
+
+
+def test_image_url_overrides_keeps_only_http_urls() -> None:
+    from cookbook.recipe_state_repository import image_url_overrides
+    state = {
+        "overrides": {
+            "a": {"id": "a", "imageUrl": " https://x/a.jpg "},
+            "b": {"id": "b", "imageUrl": ""},
+            "c": {"id": "c", "imageUrl": "recipes/photos/c"},
+            "d": {"id": "d", "imageUrl": "/liza_posts_assets/d.jpg"},
+            "e": {"id": "e"},
+        },
+        "custom": [],
+    }
+    result = image_url_overrides(state)
+    assert result == {"a": "https://x/a.jpg"}
+
+
+def test_put_recipe_state_requests_replacement_for_changed_image_url(tmp_path, storage) -> None:
+    replacements = []
+
+    class FakeBackfill:
+        def request_replacements(self, urls):
+            replacements.append(dict(urls))
+
+    handler = object.__new__(server.make_handler(tmp_path, storage, photo_backfill=FakeBackfill()))
+    handler.path = "/api/recipe-state"
+    responses = []
+    handler._json_response = lambda status, payload: responses.append((status, payload))
+
+    def put(state, revision):
+        body = json.dumps({"state": state, "revision": revision}).encode()
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        handler.do_PUT()
+        return responses.pop()
+
+    from cookbook.database import session_scope
+    from cookbook.post_repository import create_manual_recipe
+    recipe = create_manual_recipe("test")
+    rid = recipe.id
+    with session_scope(storage) as s:
+        s.add(recipe)
+
+    url = "https://cdn.example/1.jpg"
+    state = {"overrides": {rid: {"id": rid, "imageUrl": url, "title": "First"}}, "custom": [], "order": [rid]}
+    assert put(state, 0) == (200, {"revision": 1})
+    assert replacements == [{rid: url}]
+
+    # Same image URL with a different title does not trigger another download.
+    state = {"overrides": {rid: {"id": rid, "imageUrl": url, "title": "Second"}}, "custom": [], "order": [rid]}
+    assert put(state, 1) == (200, {"revision": 2})
+    assert len(replacements) == 1
+
+    # Non-downloadable local paths never trigger a download.
+    state = {"overrides": {rid: {"id": rid, "imageUrl": f"recipes/photos/{rid}", "title": "Second"}},
+             "custom": [], "order": [rid]}
+    assert put(state, 2) == (200, {"revision": 3})
+    assert len(replacements) == 1

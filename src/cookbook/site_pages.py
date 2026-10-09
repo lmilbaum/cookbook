@@ -632,7 +632,7 @@ def render_html(
           }} catch {{}}
         }}
         const allRecipes = () => baseRecipes
-          .map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}), recipeName: state.overrides[recipe.id]?.recipeName || recipe.recipeName, imageUrl: state.overrides[recipe.id]?.imageUrl || recipe.imageUrl }}))
+          .map((recipe) => ({{ ...recipe, ...(state.overrides[recipe.id] || {{}}), recipeName: state.overrides[recipe.id]?.recipeName || recipe.recipeName, imageUrl: recipe.imageUrl.startsWith("recipes/photos/") ? recipe.imageUrl : (state.overrides[recipe.id]?.imageUrl || recipe.imageUrl) }}))
         const availableIds = new Set(allRecipes().map((recipe) => recipe.id));
         if (!Array.isArray(state.order)) {{
           const baseOrder = baseRecipes.map((recipe) => recipe.id);

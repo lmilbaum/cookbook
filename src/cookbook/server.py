@@ -14,7 +14,7 @@ import webbrowser
 from dataclasses import replace
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, BinaryIO, ClassVar
+from typing import TYPE_CHECKING, Any, BinaryIO, ClassVar
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -48,7 +48,9 @@ from .recipe_page_repository import load_recipe_page
 from .recipe_photo_repository import load_recipe_photo, photo_ids
 from .recipe_state_repository import (
     RecipeStateConflict,
+    image_url_overrides,
     load_recipe_state,
+    override_image_urls,
     save_recipe_state,
 )
 from .shopping_list_repository import (
@@ -65,6 +67,9 @@ from .type_repository import (
     list_types,
     rename_type,
 )
+
+if TYPE_CHECKING:
+    from .recipe_photo_fetch import PhotoBackfill
 
 _HOME_PAGE_NAME = "index.html"
 _PHOTO_URL = "recipes/photos/{}"
@@ -105,6 +110,10 @@ def _load_report_recipes(root: Path, factory: sessionmaker[Session]) -> list[Rec
     config_path = root / "cookbook.toml"
     reverse = load_config(config_path).reverse if config_path.exists() else False
     return load_recipes(factory, reverse=reverse)
+
+
+def _refresh_reports(root: Path, factory: sessionmaker[Session]) -> None:
+    _render_reports(root / _HOME_PAGE_NAME, _load_report_recipes(root, factory), photo_ids(factory))
 
 
 def _watch_and_render(report_path: Path, factory: sessionmaker[Session]) -> None:
@@ -282,15 +291,12 @@ _MADE_DATES_PATH = re.compile(r"^/api/recipes/([^/]+)/made-dates(?:/([^/]+))?$")
 _TYPES_PATH = re.compile(r"^/api/recipe-types(?:/(\d+))?$")
 
 
-def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPRequestHandler]:
+def make_handler(
+    root: Path, factory: sessionmaker[Session], photo_backfill: "PhotoBackfill | None" = None
+) -> type[SimpleHTTPRequestHandler]:
     """Create a request handler bound to the cookbook directory and database."""
 
-    imports = ImportService(
-        root,
-        lambda: _render_reports(
-            root / _HOME_PAGE_NAME, _load_report_recipes(root, factory), photo_ids(factory)
-        ),
-    )
+    imports = ImportService(root, lambda: _refresh_reports(root, factory))
 
     class CookbookHandler(SimpleHTTPRequestHandler):
         extensions_map: ClassVar[dict[str, str]] = {**SimpleHTTPRequestHandler.extensions_map, ".webp": "image/webp"}
@@ -529,6 +535,7 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                     payload = json.loads(self.rfile.read(length))
                     if not isinstance(payload, dict) or set(payload) != {"state", "revision"}:
                         raise ValueError
+                    previous_overrides = override_image_urls(factory)
                     revision = save_recipe_state(factory, payload["state"], payload["revision"])
                 except RecipeStateConflict:
                     self._json_response(409, {"error": "Recipe state changed; reload before saving"})
@@ -539,6 +546,12 @@ def make_handler(root: Path, factory: sessionmaker[Session]) -> type[SimpleHTTPR
                 except SQLAlchemyError:
                     self._json_response(503, {"error": "Unable to save recipe state"})
                     return
+                new_override_urls = image_url_overrides(payload["state"])
+                changed = {
+                    rid: url for rid, url in new_override_urls.items() if previous_overrides.get(rid) != url
+                }
+                if photo_backfill is not None and changed:
+                    photo_backfill.request_replacements(changed)
                 self._json_response(200, {"revision": revision})
                 return
             if urlsplit(self.path).path != "/api/shopping-list":
@@ -800,13 +813,17 @@ def main() -> None:
         print(warning, file=sys.stderr)
     report_path = root / _HOME_PAGE_NAME
     _render_reports(report_path, _load_report_recipes(report_path.parent, factory), photo_ids(factory))
+    from .recipe_photo_fetch import PhotoBackfill
+
+    backfill = PhotoBackfill(factory, lambda: _refresh_reports(root, factory))
+    threading.Thread(target=backfill.run_forever, daemon=True).start()
     if args.reload:
         threading.Thread(
             target=_watch_and_render,
             args=(report_path, factory),
             daemon=True,
         ).start()
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(root, factory))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(root, factory, backfill))
     url = f"http://{args.host}:{args.port}/"
     print(f"Cookbook available at {url}")
     print("Shopping list saved to the database.")

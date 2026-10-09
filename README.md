@@ -84,7 +84,11 @@ prefer them over the expiring Instagram image URLs. The old
 `/<name>_posts_assets/<id>.jpg` URLs saved inside recipe edits keep working and
 are answered from the same table. Legacy post JSON files and cached image files
 are never read or modified by the server; import them before switching to
-database-backed pages. Existing `.env` settings remain available to the
+database-backed pages. The server also caches missing card photos in the
+background. This covers recipes whose photo could not be downloaded at import
+time and manually added recipes with an external image URL. Failed downloads
+are retried with increasing delays. Changing a recipe's image URL triggers an
+immediate re-download. Existing `.env` settings remain available to the
 server. This is a local development setup; the web server serves this directory.
 
 Compose defaults to database `cookbook`, user `cookbook`, password
