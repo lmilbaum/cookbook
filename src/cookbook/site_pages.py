@@ -348,6 +348,8 @@ def render_html(
       .card-image a {{ display: block; width: 100%; height: 100%; }}
       .card-image img {{ width: 100%; height: 100%; max-height: none; margin: 0; object-fit: cover; }}
       .recipe-page .edit-recipe {{ display: none; }}
+      .recipe-page .recipe-ingredients,
+      .recipe-page .recipe-instructions {{ display: none; }}
       .recipe-page .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; }}
       .recipe-page .recipe-form h2 {{ font-size: 1.05rem; }}
       .recipe-notes {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
