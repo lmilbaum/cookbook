@@ -94,8 +94,7 @@ _HEBREW: dict[str, str] = {
     "recipes_save_unrecoverable": "השמירה נכשלה וגיבוי הדפדפן אינו זמין. השאירו את הדף פתוח והעתיקו את השינויים.",
     # Made dates.
     "made_dates": "הכנתי בתאריכים",
-    "made_date_input": "תאריך ההכנה",
-    "mark_made": "סימון כהוכן",
+    "mark_made": "הכנתי היום",
     "made_never": "עדיין לא הוכן.",
     "remove_made_date": "הסרת התאריך {date}",
     "made_dates_load_failed": "לא ניתן לטעון את תאריכי ההכנה.",
@@ -216,8 +215,7 @@ _ENGLISH: dict[str, str] = {
     "recipes_save_unrecoverable": "Save failed and browser backup is unavailable. Keep this page open and copy your edits.",
     # Made dates.
     "made_dates": "Made on",
-    "made_date_input": "Date made",
-    "mark_made": "Mark as made",
+    "mark_made": "Made today",
     "made_never": "Not made yet.",
     "remove_made_date": "Remove {date}",
     "made_dates_load_failed": "Unable to load the dates made.",

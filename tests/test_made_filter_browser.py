@@ -1,7 +1,17 @@
 """Exercise the made-recipes filter in a real browser."""
 from __future__ import annotations
 
+import io
+from datetime import datetime
+
+import pytest
 from playwright.sync_api import expect
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from cookbook import server
+from cookbook.database import Base, session_scope
+from cookbook.made_date_repository import list_made_dates
 
 from cookbook.models import Post, Recipe
 from cookbook.site_pages import render_html
@@ -23,7 +33,7 @@ def _setup_page(page, recipes, made_recipe_ids=None, made_recipes_status=None):
     made_recipe_ids = made_recipe_ids or []
     made_recipes_status = made_recipes_status or 200
 
-    state = {"made_dates_gets": {}}
+    state = {"made_dates_gets": {}, "made_dates_posts": []}
 
     def made_recipes_route(route):
         if made_recipes_status == 503:
@@ -37,6 +47,7 @@ def _setup_page(page, recipes, made_recipe_ids=None, made_recipes_status=None):
             state["made_dates_gets"].setdefault(recipe_id, [])
             route.fulfill(json={"dates": state["made_dates_gets"][recipe_id]})
         elif route.request.method == "POST":
+            state["made_dates_posts"].append(route.request.post_data_json)
             date_str = route.request.post_data_json["date"]
             state["made_dates_gets"].setdefault(recipe_id, []).insert(0, date_str)
             made_recipe_ids.append(recipe_id)
@@ -117,7 +128,9 @@ def test_made_filter_with_nothing_made_shows_no_results_message(page):
 def test_marking_a_recipe_made_in_the_popup_updates_the_filter(page):
     """Marking a recipe as made updates the made filter live."""
     r1, r2 = _recipe("r1", "Salad"), _recipe("r2", "Soup")
-    _state = _setup_page(page, [r1, r2], made_recipe_ids=[])
+    page = page.context.browser.new_page(timezone_id="UTC")
+    page.clock.set_fixed_time(datetime.fromisoformat("2026-09-15T12:00:00+00:00"))
+    state = _setup_page(page, [r1, r2], made_recipe_ids=[])
 
     made_select = page.locator("#search-made")
     made_select.wait_for()
@@ -125,12 +138,14 @@ def test_marking_a_recipe_made_in_the_popup_updates_the_filter(page):
     # Open popup for r1 and mark as made
     page.locator(".card-title a", has_text="Salad").click()
     page.locator("#recipe-page").wait_for()
-    date_input = page.locator("#recipe-page .made-dates-date-input")
-    date_input.fill("2026-09-15")
+    expect(page.locator("#recipe-page input[type=date]")).to_have_count(0)
     page.locator("#recipe-page .mark-made").click()
 
     # Wait for the mark to be processed (date appears in the list)
-    page.locator("#recipe-page .made-dates-list li time").wait_for()
+    expect(page.locator("#recipe-page .made-dates-list li time")).to_have_attribute(
+        "datetime", "2026-09-15"
+    )
+    assert state["made_dates_posts"] == [{"date": "2026-09-15"}]
 
     # Close the popup
     page.locator("#close-recipe-page").click()
@@ -154,3 +169,72 @@ def test_made_filter_stays_disabled_when_made_recipes_cannot_load(page):
     expect(made_select).to_have_attribute("disabled", "")
     # Both cards still visible
     assert page.locator(".card").count() == 2
+
+
+@pytest.mark.parametrize(
+    ("timezone_id", "opened_at", "clicked_at", "expected_date"),
+    [
+        ("Asia/Jerusalem", "2026-09-15T21:30:00+00:00", None, "2026-09-16"),
+        ("America/Los_Angeles", "2026-09-15T00:30:00+00:00", None, "2026-09-14"),
+        ("Asia/Jerusalem", "2026-09-15T20:59:00+00:00",
+         "2026-09-15T21:01:00+00:00", "2026-09-16"),
+    ],
+)
+def test_mark_as_made_saves_local_click_date(
+    page, tmp_path, timezone_id, opened_at, clicked_at, expected_date
+):
+    """The actual browser POST stores the local day at click time, once per day."""
+    page = page.context.browser.new_page(timezone_id=timezone_id)
+    page.clock.set_fixed_time(datetime.fromisoformat(opened_at))
+    recipe = _recipe("r1", "Salad")
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with session_scope(factory) as session:
+        session.add(recipe)
+    state = _setup_page(page, [recipe])
+    responses = []
+    bodies = []
+
+    def save_made_date(route):
+        if route.request.method != "POST":
+            route.fallback()
+            return
+        body = route.request.post_data.encode()
+        bodies.append(route.request.post_data_json)
+        handler = object.__new__(server.make_handler(tmp_path, factory))
+        handler.path = "/api/recipes/r1/made-dates"
+        handler.headers = {
+            "Content-Type": "application/json", "Content-Length": str(len(body))
+        }
+        handler.rfile = io.BytesIO(body)
+        handler._json_response = lambda status, payload: responses.append((status, payload))
+        handler.do_POST()
+        status, payload = responses[-1]
+        state["made_dates_gets"]["r1"] = payload["dates"]
+        route.fulfill(status=status, json=payload)
+
+    page.route(f"{BASE}/api/recipes/r1/made-dates", save_made_date)
+    page.locator(".card-title a", has_text="Salad").click()
+    expect(page.locator("#recipe-page input[type=date]")).to_have_count(0)
+    if clicked_at:
+        page.clock.set_fixed_time(datetime.fromisoformat(clicked_at))
+    button = page.locator("#recipe-page .mark-made")
+    expect(page.locator("#recipe-page .recipe-made-dates h3")).to_have_count(0)
+    expect(button).to_have_text("הכנתי היום")
+    expect(button).to_have_attribute("aria-label", "הכנתי היום")
+    assert button.get_attribute("title") is None
+    button.click()
+    history = page.locator("#recipe-page .made-dates-list li time")
+    expect(history).to_have_attribute("datetime", expected_date)
+    assert bodies == [{"date": expected_date}]
+    assert responses == [(201, {"dates": [expected_date]})]
+    assert list_made_dates(factory, "r1") == [expected_date]
+
+    expect(button).to_be_enabled()
+    button.click()
+    expect(button).to_be_enabled()
+    assert len(bodies) == 2
+    expect(history).to_have_count(1)
+    assert list_made_dates(factory, "r1") == [expected_date]
+    engine.dispose()

@@ -264,10 +264,8 @@ def render_html(
         f'<textarea dir="auto" aria-label="{t.html("recipe_notes")}"></textarea>'
         '<p class="recipe-notes-status" aria-live="polite"></p></section>'
         f'<button class="edit-recipe" type="button">{t.html("edit_recipe")}</button>'
-        f'<section class="recipe-made-dates" hidden>'
-        f'<h3>{t.html("made_dates")}</h3>'
+        f'<section class="recipe-made-dates" aria-label="{t.html("made_dates")}" hidden>'
         f'<div class="made-dates-input">'
-        f'<input type="date" class="made-dates-date-input" aria-label="{t.html("made_date_input")}" />'
         f'<button type="button" class="mark-made" aria-label="{t.html("mark_made")}">{t.html("mark_made")}</button>'
         f'</div>'
         f'<p class="made-dates-status" aria-live="polite"></p>'
@@ -357,9 +355,7 @@ def render_html(
       .recipe-notes textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #171a21; color: #eceef3; font: inherit; }}
       .recipe-notes-status {{ min-height: 1.25em; margin: 6px 0 0; color: #92d3a2; font-size: .85rem; }}
       .recipe-made-dates {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
-      .recipe-made-dates h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .made-dates-input {{ display: flex; gap: 8px; margin-bottom: 8px; }}
-      .made-dates-date-input {{ flex: 1; padding: 8px 10px; border: 1px solid #3a414f; border-radius: 6px; background: #171a21; color: #eceef3; font: inherit; }}
       .mark-made {{ padding: 8px 12px; background: #8db7ff; color: #101218; font-weight: 600; border-radius: 6px; border: 0; cursor: pointer; }}
       .mark-made:disabled {{ opacity: 0.6; cursor: not-allowed; }}
       .made-dates-status {{ min-height: 1.25em; margin: 0 0 8px; color: #92d3a2; font-size: .85rem; }}
@@ -922,13 +918,10 @@ def render_html(
           madeSection.hidden = !hosted;
           if (hosted) {{
             renderMadeDates(card, id);
-            const dateInput = madeSection.querySelector(".made-dates-date-input");
-            dateInput.max = localToday();
             const markBtn = madeSection.querySelector(".mark-made");
             const status = madeSection.querySelector(".made-dates-status");
             markBtn.addEventListener("click", async () => {{
-              const date = dateInput.value.trim();
-              if (!date) return;
+              const date = localToday();
               markBtn.disabled = true;
               try {{
                 const resp = await fetch(`/api/recipes/${{encodeURIComponent(id)}}/made-dates`, {{
@@ -937,7 +930,6 @@ def render_html(
                   body: JSON.stringify({{ date }})
                 }});
                 if (!resp.ok) throw new Error();
-                dateInput.value = "";
                 await renderMadeDates(card, id);
               }} catch {{
                 status.textContent = {t.js('made_dates_save_failed')};

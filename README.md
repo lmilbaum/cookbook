@@ -31,10 +31,11 @@ Opening a page never starts an import.
 
 ## Recipes I made
 
-Track which recipes you have prepared. Click **סימון כהוכן** (Mark as made) in a
-recipe's popup to record the date you made it. Use the dropdown filter in the
-recipe search bar to view only recipes you've made, only recipes you haven't made
-yet, or all recipes. The filter is available only on the hosted cookbook. Filter
+Track which recipes you have prepared. Click **הכנתי היום** (Made today) in a
+recipe's popup to automatically record today's date in your browser's local
+timezone. No date entry is needed; clicking again on the same day keeps one entry.
+Use the dropdown filter in the recipe search bar to view only recipes you've made,
+only recipes you haven't made yet, or all recipes. The filter is available only on the hosted cookbook. Filter
 selection is not saved; it resets to "All" when you reload the page.
 
 ## Interface language
