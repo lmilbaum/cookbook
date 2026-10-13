@@ -20,7 +20,7 @@ from cookbook.post_repository import (
 from cookbook.recipe_photo_repository import insert_recipe_photo, load_recipe_photo
 
 
-def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, monkeypatch):
+def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, monkeypatch, capsys):
     (tmp_path / 'cookbook.toml').write_text('username = "example"\nlimit = 9\nignore_cached_posts = true\n')
     engine = create_engine('sqlite://')
     Base.metadata.create_all(engine)
@@ -45,15 +45,17 @@ def test_import_selects_one_unseen_post_and_preserves_existing_data(tmp_path, mo
     assert calls[0]['limit'] == 1 and calls[0]['headless'] is True
     assert {item.id for item in load_recipes(factory, False)} == {'known', 'next'}
     assert len(cached) == 1
+    assert capsys.readouterr().err == f'{import_service.RESULT_PREFIX}next\n'
     assert post_import_job.import_next_post(tmp_path, factory) == 0
     assert len(cached) == 1
+    assert capsys.readouterr().err == ""
     engine.dispose()
 
 
 @pytest.mark.parametrize('code,status', [(0, 'succeeded'), (3, 'empty'), (1, 'failed'), (4, 'failed')])
 def test_worker_outcomes_do_not_expose_scraper_output(tmp_path, monkeypatch, code, status):
     refreshed = []
-    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (code, ''))
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root, progress: (code, '', ''))
     service = import_service.ImportService(tmp_path, lambda: refreshed.append(True))
     service._run()
     assert service.status()['status'] == status
@@ -65,7 +67,7 @@ def test_worker_rejects_overlapping_requests_and_allows_retry(tmp_path, monkeypa
     def run(*args, **kwargs):
         entered.set()
         release.wait(3)
-        return 3, ''
+        return 3, '', ''
     monkeypatch.setattr(import_service, 'run_scraper', run)
     service = import_service.ImportService(tmp_path, lambda: None)
     assert service.start()
@@ -119,9 +121,10 @@ def test_timeout_terminates_browser_process_group(tmp_path, monkeypatch):
         pid = 12345
         returncode = -9
         calls = 0
+        stderr = io.StringIO()
         def __enter__(self): return self
         def __exit__(self, *args): pass
-        def communicate(self, timeout=None):
+        def wait(self, timeout=None):
             self.calls += 1
             if timeout is not None:
                 assert timeout == 1800
@@ -144,7 +147,7 @@ def test_failed_import_logs_the_scraper_output_and_shows_only_the_safe_reason(tm
         "Traceback ... password=hunter2 ...\n"
         f"{import_service.REASON_PREFIX}pagination_unconfirmed\n"
     )
-    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (4, errors))
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root, progress: (4, errors, ''))
     service = import_service.ImportService(tmp_path, lambda: None)
     service._run()
 
@@ -157,7 +160,7 @@ def test_failed_import_logs_the_scraper_output_and_shows_only_the_safe_reason(tm
 
 
 def test_unknown_reason_from_the_job_is_not_passed_to_the_page(tmp_path, monkeypatch):
-    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (4, f"{import_service.REASON_PREFIX}password=hunter2\n"))
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root, progress: (4, f"{import_service.REASON_PREFIX}password=hunter2\n", ""))
     service = import_service.ImportService(tmp_path, lambda: None)
     service._run()
     assert service.status()['reason_code'] == '' and 'hunter2' not in str(service.status())
@@ -165,7 +168,7 @@ def test_unknown_reason_from_the_job_is_not_passed_to_the_page(tmp_path, monkeyp
 
 def test_every_status_carries_a_code_the_page_can_localize(tmp_path, monkeypatch):
     def run(code, errors=''):
-        monkeypatch.setattr(import_service, 'run_scraper', lambda root: (code, errors))
+        monkeypatch.setattr(import_service, 'run_scraper', lambda root, progress: (code, errors, ''))
         service = import_service.ImportService(tmp_path, lambda: None)
         service._run()
         return service.status()['code']
@@ -175,7 +178,7 @@ def test_every_status_carries_a_code_the_page_can_localize(tmp_path, monkeypatch
 
 
 def test_failed_import_without_a_reason_keeps_the_generic_message(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(import_service, 'run_scraper', lambda root: (1, 'Traceback: boom'))
+    monkeypatch.setattr(import_service, 'run_scraper', lambda root, progress: (1, 'Traceback: boom', ''))
     service = import_service.ImportService(tmp_path, lambda: None)
     service._run()
 
@@ -203,10 +206,11 @@ def test_run_scraper_returns_the_job_stderr(tmp_path, monkeypatch):
         returncode = 4
         def __enter__(self): return self
         def __exit__(self, *args): pass
-        def communicate(self, timeout=None): return None, 'reason text'
+        stderr = io.StringIO('reason text')
+        def wait(self, timeout=None): return 4
     monkeypatch.setattr(import_service.subprocess, 'Popen', lambda command, **kwargs: Process())
 
-    assert import_service.run_scraper(tmp_path) == (4, 'reason text')
+    assert import_service.run_scraper(tmp_path) == (4, 'reason text', '')
 
 
 def test_import_post_by_url_scrapes_and_stores_recipe(tmp_path, monkeypatch):
@@ -475,3 +479,131 @@ def test_import_next_post_caption_error_does_not_fail_import(tmp_path, monkeypat
     assert imported == 1
 
     engine.dispose()
+
+
+def test_progress_streams_before_worker_exit_and_rejects_private_output(tmp_path, monkeypatch):
+    """Use a real worker pipe: progress must arrive while the job still runs."""
+    import sys
+
+    real_popen = subprocess.Popen
+    release = tmp_path / 'release-worker'
+    script = (
+        "import pathlib,time,sys\n"
+        "print('IMPORT-PROGRESS: password=private',file=sys.stderr,flush=True)\n"
+        "print('IMPORT-PROGRESS: -1',file=sys.stderr,flush=True)\n"
+        "print('IMPORT-PROGRESS: 12',file=sys.stderr,flush=True)\n"
+        f"while not pathlib.Path({str(release)!r}).exists(): time.sleep(.01)\n"
+        "print('IMPORT-PROGRESS: 24',file=sys.stderr,flush=True)\n"
+    )
+    monkeypatch.setattr(import_service.subprocess, 'Popen',
+                        lambda command, **kwargs: real_popen([sys.executable, '-c', script], **kwargs))
+    observed = threading.Event()
+    counts = []
+    result = []
+    def progress(count):
+        counts.append(count)
+        observed.set()
+    worker = threading.Thread(target=lambda: result.append(import_service.run_scraper(tmp_path, progress)))
+    worker.start()
+    try:
+        assert observed.wait(3)
+        assert worker.is_alive()
+        assert counts == [12]
+    finally:
+        release.touch()
+        worker.join(3)
+    assert counts == [12, 24]
+    assert result[0][0] == 0
+
+
+def test_reviewed_count_is_retained_at_completion_and_reset_for_each_job(tmp_path, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    def run(root, progress):
+        progress(24)
+        progress(12)
+        entered.set()
+        release.wait(3)
+        return 3, '', ''
+    monkeypatch.setattr(import_service, 'run_scraper', run)
+    service = import_service.ImportService(tmp_path, lambda: None)
+    assert service.status()['reviewed_posts'] == 0
+    assert service.start()
+    assert entered.wait(2)
+    assert service.status()['reviewed_posts'] == 24
+    release.set()
+    # Wait for the actual worker to record its terminal status.
+    import time
+    deadline = time.monotonic() + 2
+    while service.status()['status'] == 'running' and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert service.status()['reviewed_posts'] == 24
+    monkeypatch.setattr(import_service.threading, 'Thread', lambda **kwargs: type('Thread', (), {'start': lambda self: None})())
+    assert service.start()
+    assert service.status()['reviewed_posts'] == 0
+
+
+def test_timeout_covers_child_stderr_after_parent_exits(tmp_path, monkeypatch):
+    """A departed worker's browser child must not keep the import running forever."""
+    import os
+    import signal
+    import sys
+    import time
+
+    real_popen = subprocess.Popen
+    timeout = .4
+    monkeypatch.setattr(import_service, '_JOB_TIMEOUT', timeout)
+    child_pid = tmp_path / 'child-pid'
+    parent_pid = tmp_path / 'parent-pid'
+    script = (
+        'import os,pathlib,subprocess,sys\n'
+        f'pathlib.Path({str(parent_pid)!r}).write_text(str(os.getpid()))\n'
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2)'])\n"
+        f'pathlib.Path({str(child_pid)!r}).write_text(str(child.pid))\n'
+    )
+    monkeypatch.setattr(import_service.subprocess, 'Popen',
+                        lambda command, **kwargs: real_popen([sys.executable, '-c', script], **kwargs))
+    groups = []
+    real_killpg = os.killpg
+    def killpg(pid, sig):
+        groups.append((pid, sig))
+        real_killpg(pid, sig)
+    monkeypatch.setattr(import_service.os, 'killpg', killpg)
+    started = time.monotonic()
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            import_service.run_scraper(tmp_path)
+        assert time.monotonic() - started < 3
+        assert groups == [(int(parent_pid.read_text()), signal.SIGKILL)]
+        # Killing the inherited pipe holder closes stderr; the reader cannot finish
+        # until that happens. On POSIX the child may briefly remain as a zombie.
+        assert child_pid.exists()
+    finally:
+        if parent_pid.exists():
+            try:
+                real_killpg(int(parent_pid.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.parametrize("marker", ["actual_Post-1", "", "bad id", "x" * 65])
+def test_result_marker_is_validated_and_survives_diagnostic_tail(tmp_path, monkeypatch, marker):
+    import sys
+    real_popen = import_service.subprocess.Popen
+    script = f"import sys; print('IMPORT-RESULT: {marker}', file=sys.stderr); print('x' * 9000, file=sys.stderr)"
+    monkeypatch.setattr(import_service.subprocess, 'Popen',
+                        lambda command, **kwargs: real_popen([sys.executable, '-c', script], **kwargs))
+    code, errors, recipe_id = import_service.run_scraper(tmp_path)
+    assert code == 0
+    assert len(errors) <= import_service._LOG_TAIL
+    assert recipe_id == (marker if marker == "actual_Post-1" else "")
+
+
+@pytest.mark.parametrize("code", [0, 1, 3, 4])
+def test_imported_identity_only_available_after_success_and_reset(tmp_path, monkeypatch, code):
+    monkeypatch.setattr(import_service, 'run_scraper', lambda *args: (code, '', 'actual_Post-1'))
+    service = import_service.ImportService(tmp_path, lambda: None)
+    service._run()
+    assert service.status()['imported_recipe_id'] == ('actual_Post-1' if code == 0 else '')
+    monkeypatch.setattr(import_service.threading, 'Thread', lambda **kwargs: type('Thread', (), {'start': lambda self: None})())
+    assert service.start()
+    assert service.status()['imported_recipe_id'] == ''

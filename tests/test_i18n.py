@@ -127,9 +127,9 @@ def test_user_content_uses_automatic_direction() -> None:
 
 
 def test_every_import_status_and_reason_the_server_can_send_is_translated() -> None:
-    """The server sends codes; a code without a string would show a raw English fallback."""
+    """Visible status and reason codes have localized messages; success is silent."""
     for code, locale in LOCALES.items():
-        for status in ("running", "succeeded", "empty", "failed", "timeout", "error", "incomplete"):
+        for status in ("running", "empty", "failed", "timeout", "error", "incomplete"):
             assert f"import_{status}" in locale.strings, (code, status)
         for reason in REASONS:
             assert f"import_reason_{reason}" in locale.strings, (code, reason)
