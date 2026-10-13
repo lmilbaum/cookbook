@@ -17,10 +17,12 @@ credentials, and browser session are reused; the report limit does not limit
 these individual imports.
 
 Imports run in the background and may take several minutes while the scraper
-scrolls the profile. The button shows progress and prevents overlapping jobs
-across tabs. After success, use **רענון ספר המתכונים** (Refresh cookbook) to see the post; the app
-does not reload the page automatically while you may be editing. Failures and
-an exhausted feed are shown in the page. Jobs time out after 30 minutes. A server
+scrolls the profile. An animated image shows the number of unique posts reviewed,
+including previously imported posts, while the button prevents overlapping jobs
+across tabs. The total is unknown during scanning. After a successful import,
+the page refreshes automatically and opens the imported recipe once, without a
+completion notice. Closing it returns to the cookbook; later refreshes do not reopen it.
+Failures and an exhausted feed are shown in the page. Jobs time out after 30 minutes. A server
 restart interrupts an active job; refresh the cookbook before retrying.
 
 Compose includes Chromium and its system dependencies. For a host-run server,

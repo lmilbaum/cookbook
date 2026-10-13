@@ -16,7 +16,7 @@ from .config import load_config, resolve_from
 
 _INSTAGRAM_MEDIA_RE = _re.compile(r"instagram\.com(/(?:p|reels?)/[A-Za-z0-9_-]+)")
 from .database import create_session_factory, session_scope
-from .import_service import REASON_PREFIX
+from .import_service import PROGRESS_PREFIX, REASON_PREFIX, RESULT_PREFIX
 from .models import Post, Recipe
 from .post_repository import insert_missing_recipes
 from .recipe_photo_fetch import download_photo, store_missing_photos
@@ -64,6 +64,7 @@ def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
         login_pass=os.getenv("INSTAGRAM_PASSWORD", "").strip(),
         session_file=str(resolve_from(root, config.session_file)),
         seen_shortcodes=seen, feed_position_from_end=1,
+        progress=lambda count: print(f"{PROGRESS_PREFIX}{count}", file=sys.stderr, flush=True),
     )
     recipes = [
         recipe for recipe in recipes if recipe.post is not None and recipe.post.shortcode not in seen
@@ -85,6 +86,8 @@ def import_next_post(root: Path, factory: sessionmaker[Session]) -> int:
                     f"Caption parsing skipped for {recipe_id}: {type(error).__name__}",
                     file=sys.stderr,
                 )
+        if _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", ids[0]):
+            print(f"{RESULT_PREFIX}{ids[0]}", file=sys.stderr, flush=True)
     return imported
 
 

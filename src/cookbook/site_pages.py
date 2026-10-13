@@ -137,15 +137,23 @@ _IMPORT_POST_SCRIPT = r"""
         const controls = document.getElementById("import-controls");
         const button = document.getElementById("import-post");
         const status = document.getElementById("import-status");
+        const progress = document.getElementById("import-progress");
+        const count = document.getElementById("import-count");
         if (!location.protocol.startsWith("http")) {
           controls.hidden = true;
           return;
         }
         let timer;
         let wasRunning = false;
+        let reloadScheduled = false;
+        const showProgress = (reviewed = 0) => {
+          progress.hidden = false;
+          count.textContent = @@import_reviewed@@.replace("{count}", Number.isSafeInteger(reviewed) && reviewed >= 0 ? reviewed : 0);
+          status.textContent = "";
+        };
         const messages = {
           running: @@import_running@@,
-          succeeded: @@import_succeeded@@,
+          succeeded: "",
           empty: @@import_empty@@,
           failed: @@import_failed@@,
           timeout: @@import_timeout@@,
@@ -171,9 +179,19 @@ _IMPORT_POST_SCRIPT = r"""
           clearTimeout(timer);
           button.disabled = result.status === "running";
           button.setAttribute("aria-busy", String(button.disabled));
-          status.textContent = describe(result);
+          progress.hidden = !button.disabled;
+          if (button.disabled) showProgress(result.reviewed_posts);
+          else status.textContent = describe(result);
           if (result.status === "running") wasRunning = true;
-          if (result.status === "succeeded" && wasRunning) { setTimeout(() => location.reload(), 1000); }
+          if (result.status === "succeeded" && wasRunning && !reloadScheduled) {
+            reloadScheduled = true;
+            try {
+              if (/^[A-Za-z0-9_-]{1,64}$/.test(result.imported_recipe_id ?? "")) {
+                sessionStorage.setItem("cookbook-imported-recipe", result.imported_recipe_id);
+              }
+            } catch {}
+            setTimeout(() => location.reload(), 1000);
+          }
           if (button.disabled) timer = setTimeout(check, 2000);
         };
         const check = async () => {
@@ -189,7 +207,8 @@ _IMPORT_POST_SCRIPT = r"""
         };
         button.addEventListener("click", async () => {
           button.disabled = true;
-          status.textContent = @@import_starting@@;
+          button.setAttribute("aria-busy", "true");
+          showProgress();
           try {
             const response = await fetch("/api/import-post", {
               method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
@@ -300,6 +319,10 @@ def render_html(
       .header-actions {{ display: flex; flex-wrap: wrap; gap: 8px; }}
       .import-feedback {{ margin: 8px 0 16px; }}
       .import-feedback p {{ margin: 0 0 6px; }}
+      #import-progress:not([hidden]) {{ display: flex; align-items: center; gap: 12px; }}
+      .import-spinner {{ width: 40px; height: 40px; color: #8db7ff; animation: import-spin 1.4s linear infinite; }}
+      @keyframes import-spin {{ to {{ transform: rotate(360deg); }} }}
+      @media (prefers-reduced-motion: reduce) {{ .import-spinner {{ animation: none; }} }}
       button:disabled {{ opacity: .6; cursor: wait; }}
       .page-header h1 {{ margin: 0; }}
       .no-filter-results {{ color: #929baa; }}
@@ -461,6 +484,13 @@ def render_html(
         </div>
       </div>
       <div class="import-feedback">
+        <div id="import-progress" hidden role="status" aria-live="polite" aria-label="{t.html('import_progress')}">
+          <svg class="import-spinner" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+            <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" stroke-width="4" opacity="0.2" />
+            <path d="M20 4a16 16 0 0 1 16 16" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" />
+          </svg>
+          <span id="import-count">{t.html('import_reviewed').replace('{count}', '0')}</span>
+        </div>
         <p id="import-status" role="status" aria-live="polite"></p>
       </div>
       <div class="recipe-search" id="recipe-search" role="search" aria-label="{t.html('search_recipes')}">
@@ -964,7 +994,15 @@ def render_html(
           event.preventDefault(); showRecipe(link.dataset.openRecipe);
         }});
         document.getElementById("close-recipe-page").addEventListener("click", () => recipePage.close());
-        if (selectedRecipeId) showRecipe(selectedRecipeId, false);
+        let importedRecipeId = null;
+        try {{
+          importedRecipeId = sessionStorage.getItem("cookbook-imported-recipe");
+          sessionStorage.removeItem("cookbook-imported-recipe");
+        }} catch {{ importedRecipeId = null; }}
+        if (importedRecipeId && gridCard(importedRecipeId)) {{
+          history.replaceState(null, "", "index.html");
+          showRecipe(importedRecipeId);
+        }} else if (selectedRecipeId) showRecipe(selectedRecipeId, false);
         if (!grid.children.length) grid.innerHTML = "<p>{t.html('no_recipes')}</p>";
         const savedScrollPosition = sessionStorage.getItem(scrollStorageKey);
         if (savedScrollPosition !== null) {{

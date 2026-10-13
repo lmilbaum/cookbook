@@ -7,6 +7,7 @@ import importlib
 import re
 import time
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -633,6 +634,7 @@ def fetch_posts_browser(
     session_file: str = ".instagram.session",
     seen_shortcodes: set[str] | None = None,
     feed_position_from_end: int = 0,
+    progress: Callable[[int], None] | None = None,
 ) -> list[Recipe]:
     """Fetch Instagram posts using a headless browser with required authentication."""
 
@@ -641,6 +643,8 @@ def fetch_posts_browser(
     if not login_pass:
         raise ValueError("Browser scraping requires INSTAGRAM_PASSWORD.")
 
+    if progress is not None:
+        progress(0)
     playwright = _load_playwright()
     browser_session = _browser_session_path(session_file)
     seen_shortcodes = seen_shortcodes or set()
@@ -676,11 +680,18 @@ def fetch_posts_browser(
 
             timeline = ProfileTimeline() if feed_position_from_end > 0 else None
             if timeline is not None:
-                page.on("response", timeline.observe)
+                def observe(response: Any) -> None:
+                    timeline.observe(response)
+                    if progress is not None:
+                        progress(len(timeline.posts))
+
+                page.on("response", observe)
             _open_profile(page, username, timeout_seconds)
 
             print("Scrolling to load posts...")
             media_paths = _scroll_profile_until_complete(page, username, timeline)
+            if progress is not None and timeline is not None:
+                progress(len(timeline.posts))
             print(f"Collected {len(media_paths)} media items from the profile grid")
             if timeline is not None and timeline.skipped_edges:
                 print(f"Skipped {timeline.skipped_edges} malformed timeline entr{'y' if timeline.skipped_edges == 1 else 'ies'}")

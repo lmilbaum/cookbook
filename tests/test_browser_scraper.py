@@ -80,3 +80,47 @@ def test_missing_publication_time_falls_back_to_dom_time(page):
         body='<article>caption</article><time datetime="2022-08-11T00:00:00Z"></time>'))
     post = _fetch_post_details(page, '/p/known/', timeout_seconds=5)
     assert post.timestamp_utc == datetime(2022, 8, 11, tzinfo=UTC).isoformat()
+
+
+def test_scraper_reports_distinct_valid_timeline_posts_including_stored(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from cookbook import browser_scraper as scraper
+    from cookbook.profile_timeline import ProfileTimeline
+
+    callbacks = {}
+    class Page:
+        def on(self, name, callback): callbacks[name] = callback
+    class Context:
+        def new_page(self): return Page()
+        def close(self): pass
+    class Browser:
+        def close(self): pass
+    class Driver:
+        chromium = SimpleNamespace(launch=lambda **kwargs: Browser())
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(scraper, '_load_playwright', lambda: SimpleNamespace(sync_playwright=Driver))
+    monkeypatch.setattr(scraper, '_new_context', lambda *args, **kwargs: Context())
+    monkeypatch.setattr(scraper, '_context_has_session', lambda _: True)
+    monkeypatch.setattr(scraper, '_verify_profile_access', lambda *args: True)
+    session = tmp_path / 'session'
+    session.touch()
+    monkeypatch.setattr(scraper, '_browser_session_path', lambda _: session)
+    def open_profile(*args):
+        def response(payload):
+            callbacks['response'](SimpleNamespace(url='https://instagram.test/graphql', json=lambda: payload))
+        def payload(nodes):
+            return {'data': {ProfileTimeline.connection_key: {
+                'edges': [{'node': n} for n in nodes], 'page_info': {'has_next_page': False}}}}
+        response(payload([{'code': 'stored', 'taken_at': 1}, {'code': 'stored', 'taken_at': 1},
+                          {'code': 'invalid!'}, {'code': 'other', 'taken_at': 2}]))
+        response({'data': {'unrelated_feed': {'edges': [{'node': {'code': 'private'}}]}}})
+        response(payload([{'code': 'other', 'taken_at': 2}]))
+    monkeypatch.setattr(scraper, '_open_profile', open_profile)
+    monkeypatch.setattr(scraper, '_scroll_profile_until_complete', lambda page, username, timeline: timeline.paths())
+    counts = []
+    assert scraper.fetch_posts_browser('profile', login_user='user', login_pass='password',
+                                       session_file=str(session), feed_position_from_end=1,
+                                       seen_shortcodes={'stored', 'other'}, progress=counts.append) == []
+    assert counts == [0, 2, 2, 2, 2]
