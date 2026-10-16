@@ -131,18 +131,18 @@ class RenderHtmlTests(unittest.TestCase):
 
         self.assertIn('ingredients: [...ingredientsEditorBody.rows].map', document)
         self.assertIn('instructions: instructionsInput.value.trim()', document)
-        self.assertIn('<table class="ingredients-table"><thead><tr><th scope="col">שם</th><th scope="col">זנים מועדפים</th><th scope="col">כמות</th>', document)
+        self.assertIn('<table class="ingredients-table"><thead><tr><th scope="col">Name</th><th scope="col">Preferred varieties</th><th scope="col">Amount</th>', document)
         self.assertIn('const normalizeIngredients = (value)', document)
         self.assertIn('const addIngredientRow = (ingredient = {})', document)
         self.assertIn('cell.textContent = value', document)
         self.assertIn('ingredientsBox.hidden = false', document)
         self.assertIn(': [{ name: "", varieties: "", amount: "" }]', document)
         self.assertIn(r'.split(/\r?\n/)', document)
-        self.assertIn('<section class="recipe-notes"><h3>הערות</h3><textarea dir="auto" aria-label="הערות למתכון"></textarea>', document)
+        self.assertIn('<section class="recipe-notes"><h3>Notes</h3><textarea dir="auto" aria-label="Recipe notes"></textarea>', document)
         self.assertIn('.edit-recipe { display: block; margin: 0 0 10px; margin-inline-end: auto; padding: 0; background: transparent; color: #8db7ff;', document)
-        self.assertIn('<h3>הוראות הכנה</h3><pre dir="auto"></pre>', document)
-        self.assertIn('<span>דרוש הכנה של</span><select aria-label="דרוש הכנה של">', document)
-        self.assertIn('class="prerequisite-link">למתכון</a>', document)
+        self.assertIn('<h3>Instructions</h3><pre dir="auto"></pre>', document)
+        self.assertIn('<span>Requires preparing</span><select aria-label="Requires preparing">', document)
+        self.assertIn('class="prerequisite-link">Go to recipe</a>', document)
         self.assertIn('`index.html?recipe=${encodeURIComponent(prerequisiteSelect.value)}`', document)
         self.assertIn('.recipe-prerequisite { display: flex; align-items: center;', document)
         self.assertIn('event.target.closest(".recipe-prerequisite select")', document)
@@ -156,7 +156,7 @@ class RenderHtmlTests(unittest.TestCase):
 
         self.assertIn('"recipeName": "roasted vegetables"', document)
         self.assertIn(".recipe-links { display: grid; gap: 5px;", document)
-        self.assertIn('class="card-meta" aria-label="קישורים למתכון"', document)
+        self.assertIn('class="card-meta" aria-label="Recipe links"', document)
         self.assertIn(".recipe-notes { margin: 14px 0;", document)
 
     def test_recipe_link_prefers_the_page_title_when_available(self) -> None:
@@ -182,7 +182,7 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertNotIn('id="recipe-notes"', cookbook)
         self.assertIn('const scrollStorageKey = "cookbook-main-scroll-position"', cookbook)
         self.assertIn("window.scrollTo(0, Number(savedScrollPosition) || 0)", cookbook)
-        self.assertIn("<title>הערות למתכון</title>", notes)
+        self.assertIn("<title>Recipe notes</title>", notes)
         self.assertIn('class="notes-grid"', notes)
         self.assertIn('new URLSearchParams(window.location.search).get("id")', notes)
         self.assertIn('candidate.id === recipeId', notes)
@@ -233,7 +233,7 @@ class RenderHtmlTests(unittest.TestCase):
     def test_empty_report_still_contains_add_recipe_interface(self) -> None:
         document = render_html([], "favicon.svg")
 
-        self.assertIn("<p>לא נמצאו מתכונים.</p>", document)
+        self.assertIn("<p>No recipes found.</p>", document)
         self.assertIn('id="add-recipe"', document)
         self.assertIn('id="recipe-dialog"', document)
 
@@ -301,18 +301,18 @@ class RenderHtmlTests(unittest.TestCase):
 
     def test_shopping_list_displays_items_alphabetically(self) -> None:
         document = render_shopping_list_html("favicon.svg")
-        self.assertIn('a.name.localeCompare(b.name, "he")', document)
+        self.assertIn('a.name.localeCompare(b.name, "en")', document)
 
     def test_shopping_list_can_be_sent_to_trello(self) -> None:
         document = render_shopping_list_html("favicon.svg")
 
         self.assertNotIn('id="share-list"', document)
         self.assertIn('id="send-to-trello"', document)
-        self.assertIn('<span>ייצוא ל־</span><bdi>Trello</bdi>', document)
+        self.assertIn('<span>Export to </span><bdi>Trello</bdi>', document)
         self.assertNotIn("navigator.share", document)
         self.assertIn('fetch("/api/trello/cards"', document)
         self.assertIn('setBidiStatus(statusText, "My To Do List", ". ")', document)
-        self.assertIn('setBidiStatus("מייצא את רשימת הקניות ל־", "Trello", "…")', document)
+        self.assertIn('setBidiStatus("Exporting the shopping list to ", "Trello", "…")', document)
         self.assertNotIn("https://trello.com/add-card?", document)
         self.assertIn('fetch("/api/shopping-list"', document)
         self.assertIn('method: "PUT"', document)
@@ -359,9 +359,9 @@ def test_made_filter_is_present_in_the_recipe_grid() -> None:
     assert 'value="made"' in document.split('id="search-made"')[1].split('</select>')[0]
     assert 'value="not_made"' in document.split('id="search-made"')[1].split('</select>')[0]
 
-    # Check for Hebrew labels
-    assert "כן" in document  # filter_made
-    assert "לא" in document  # filter_not_made
+    # Check for English labels
+    assert "Yes" in document  # filter_made
+    assert "No" in document  # filter_not_made
 
     # Check that the JavaScript sets up the made filter
     assert "const searchMade = document.getElementById(\"search-made\")" in document

@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-DEFAULT_LOCALE = "he"
+DEFAULT_LOCALE = "en"
 
 _HEBREW: dict[str, str] = {
     "app_title": "ספר המתכונים שלי",
@@ -137,7 +137,7 @@ _HEBREW: dict[str, str] = {
 }
 
 _ENGLISH: dict[str, str] = {
-    "app_title": "My cookbook",
+    "app_title": "My Cookbook",
     "saved": "Saved.",
     "saving": "Saving…",
     # Cookbook page.
