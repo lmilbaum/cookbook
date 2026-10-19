@@ -369,3 +369,23 @@ def test_made_filter_is_present_in_the_recipe_grid() -> None:
     assert "madeRecipeIds.has(recipe.id)" in document
     assert 'fetch("/api/made-recipes"' in document
     assert "searchMade.disabled = false" in document
+
+
+def test_rating_badge_is_rendered_and_visible_in_grid() -> None:
+    """Cards get a rating badge, the popup gets the rating controls, and the grid hides only the controls."""
+    document = render_html([make_recipe()], "favicon.svg")
+
+    assert 'class="rating-badge"' in document
+    assert 'class="recipe-rating"' in document
+    assert 'fetch("/api/recipe-ratings"' in document
+    assert "const recipeRatings = new Map();" in document
+
+    # The grid hides the popup controls but keeps the badge visible.
+    grid_rule = document.split(".grid .edit-recipe { display: none; }")[0]
+    grid_selectors = grid_rule[grid_rule.rindex(".grid .card-meta,"):]
+    assert ".grid .recipe-rating," in grid_selectors
+    assert "rating-badge" not in grid_selectors
+
+    # Ratings are loaded separately, so recipe objects never carry one.
+    base_recipes_line = next(line for line in document.splitlines() if "const baseRecipes =" in line)
+    assert '"rating"' not in base_recipes_line

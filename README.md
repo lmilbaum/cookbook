@@ -40,6 +40,11 @@ Use the dropdown filter in the recipe search bar to view only recipes you've mad
 only recipes you haven't made yet, or all recipes. The filter is available only on the hosted cookbook. Filter
 selection is not saved; it resets to "All" when you reload the page.
 
+## Rating recipes
+
+Give a recipe a thumbs up or down from its popup on the hosted cookbook. Clicking the
+active thumb again clears the rating. A small thumb icon appears on each card to show its rating.
+
 ## Interface language
 
 The generated pages are Hebrew (`<html lang="he" dir="rtl">`). All interface

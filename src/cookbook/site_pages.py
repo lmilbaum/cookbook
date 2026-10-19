@@ -14,6 +14,14 @@ from .models import Recipe
 # stays the same in every locale.
 _UNKNOWN_TYPE = "לא ידוע"
 
+# Thumbs icon for rating buttons and the card badge. The thumbs-down button and badge flip it in CSS.
+_THUMB_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1.2em" height="1.2em" '
+    'fill="currentColor" aria-hidden="true"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32'
+    'c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22'
+    'l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
+)
+
 
 def _recipe_name_from_url(recipe_url: str) -> str:
     """Derive a readable recipe name from the final segment of its URL."""
@@ -265,6 +273,7 @@ def render_html(
     safe_favicon_href = html.escape(favicon_href, quote=True)
     card_template = (
         '<header class="card-header"><h2 class="card-title" dir="auto"><a class="recipe-detail-link"></a></h2>'
+        '<span class="rating-badge" role="img" hidden></span>'
         f'<div class="card-meta" aria-label="{t.html("recipe_links")}">'
         f'<span class="meta-label">{t.html("filter_source")}</span><p class="link-row source-link"></p>'
         f'<span class="meta-label">{t.html("recipes")}</span><div class="recipe-links"></div></div></header>'
@@ -283,6 +292,10 @@ def render_html(
         f'<textarea dir="auto" aria-label="{t.html("recipe_notes")}"></textarea>'
         '<p class="recipe-notes-status" aria-live="polite"></p></section>'
         f'<button class="edit-recipe" type="button">{t.html("edit_recipe")}</button>'
+        f'<section class="recipe-rating" role="group" aria-label="{t.html("rating")}" hidden>'
+        f'<button type="button" class="rate-up" aria-pressed="false" aria-label="{t.html("rate_up")}">{_THUMB_SVG}</button>'
+        f'<button type="button" class="rate-down" aria-pressed="false" aria-label="{t.html("rate_down")}">{_THUMB_SVG}</button>'
+        '<p class="rating-status" aria-live="polite"></p></section>'
         f'<section class="recipe-made-dates" aria-label="{t.html("made_dates")}" hidden>'
         f'<div class="made-dates-input">'
         f'<button type="button" class="mark-made" aria-label="{t.html("mark_made")}">{t.html("mark_made")}</button>'
@@ -347,7 +360,8 @@ def render_html(
       }}
       .shopping-list-link:hover {{ background: #a8c8ff; }}
       .shopping-list-link:focus-visible {{ outline: 3px solid #eceef3; outline-offset: 3px; }}
-      .card-header {{ display: grid; justify-items: start; gap: 10px; margin-bottom: 14px; }}
+      .card-header {{ display: grid; grid-template-columns: repeat(2, max-content); justify-content: start; justify-items: start; align-items: center; gap: 10px; margin-bottom: 14px; }}
+      .card-header .card-meta {{ grid-column: 1 / -1; }}
       .card-meta {{ display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 12px; width: fit-content; max-width: 100%; border: 1px solid #303644; border-radius: 9px; padding: 10px 12px; background: #12151b; }}
       .meta-label {{ color: #929baa; font-size: .82rem; font-weight: 600; line-height: 1.45; }}
       .source-link {{ min-width: 0; }}
@@ -361,6 +375,7 @@ def render_html(
       .grid .recipe-ingredients,
       .grid .recipe-instructions,
       .grid .recipe-notes,
+      .grid .recipe-rating,
       .grid .recipe-made-dates,
       .grid .edit-recipe {{ display: none; }}
       .grid .card-header {{ margin-bottom: 12px; }}
@@ -387,6 +402,19 @@ def render_html(
       .made-dates-list li:last-child {{ border-bottom: 0; }}
       .remove-made-date {{ padding: 4px 8px; background: transparent; color: #8db7ff; border: 0; cursor: pointer; font-weight: 600; }}
       .remove-made-date:hover {{ color: #a8c8ff; }}
+      .rating-badge {{ display: inline-flex; align-items: center; font-size: 1.2em; }}
+      .rating-badge[hidden] {{ display: none; }}
+      .rating-badge.up {{ color: #92d3a2; }}
+      .rating-badge.down {{ color: #e58a8f; }}
+      .rating-badge.down svg {{ transform: scaleY(-1); }}
+      .recipe-rating {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
+      .recipe-rating button {{ display: inline-flex; align-items: center; margin-inline-end: 8px; padding: 6px 10px; background: transparent; color: #eceef3; border: 1px solid #3a414f; border-radius: 6px; cursor: pointer; }}
+      .recipe-rating button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+      .recipe-rating [aria-pressed="true"] {{ background: #1d2636; }}
+      .recipe-rating .rate-up[aria-pressed="true"] {{ color: #92d3a2; border-color: #92d3a2; }}
+      .recipe-rating .rate-down[aria-pressed="true"] {{ color: #e58a8f; border-color: #e58a8f; }}
+      .recipe-rating .rate-down svg {{ transform: scaleY(-1); }}
+      .rating-status {{ min-height: 1.25em; margin: 8px 0 0; color: #92d3a2; font-size: .85rem; }}
       .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
       .recipe-instructions h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-instructions pre {{ margin: 0; }}
@@ -728,6 +756,20 @@ def render_html(
           remove.addEventListener("click", () => {{ row.remove(); if (!ingredientsEditorBody.rows.length) addIngredientRow(); }});
           actionCell.append(remove); row.append(actionCell); ingredientsEditorBody.append(row);
         }};
+        const thumbIconSvg = {json.dumps(_THUMB_SVG)};
+        const recipeRatings = new Map();
+        const renderRating = (card, id) => {{
+          const rating = recipeRatings.get(id) || "";
+          const badge = card.querySelector(".rating-badge");
+          badge.hidden = !rating;
+          badge.classList.toggle("up", rating === "up");
+          badge.classList.toggle("down", rating === "down");
+          badge.innerHTML = rating ? thumbIconSvg : "";
+          if (rating) badge.setAttribute("aria-label", rating === "up" ? {t.js('rated_up')} : {t.js('rated_down')});
+          else badge.removeAttribute("aria-label");
+          card.querySelector(".rate-up").setAttribute("aria-pressed", String(rating === "up"));
+          card.querySelector(".rate-down").setAttribute("aria-pressed", String(rating === "down"));
+        }};
         const updateCard = (card, recipe) => {{
           card.querySelector(".recipe-detail-link").textContent = recipe.title;
           const detailUrl = `index.html?recipe=${{encodeURIComponent(recipe.id)}}`;
@@ -793,6 +835,7 @@ def render_html(
             const imageLink = document.createElement("a"); imageLink.href = detailUrl; imageLink.dataset.openRecipe = recipe.id; imageLink.setAttribute("aria-label", fmt({t.js('recipe_details')}, {{ title: recipe.title }})); imageLink.append(image); imageBox.append(imageLink);
           }}
           card.dataset.recipe = JSON.stringify(recipe);
+          renderRating(card, recipe.id);
         }};
         const createCard = (recipe) => {{
           const card = document.createElement("article"); card.className = "card"; card.dataset.recipeId = recipe.id; card.id = `recipe-${{encodeURIComponent(recipe.id)}}`;
@@ -878,6 +921,16 @@ def render_html(
               data.recipe_ids?.forEach((id) => madeRecipeIds.add(id));
               searchMade.disabled = false;
               applySourceFilter();
+            }})
+            .catch(() => {{}});
+          fetch("/api/recipe-ratings", {{ cache: "no-store" }})
+            .then((resp) => {{
+              if (!resp.ok) throw new Error();
+              return resp.json();
+            }})
+            .then((data) => {{
+              Object.entries(data.ratings).forEach(([id, rating]) => recipeRatings.set(id, rating));
+              grid.querySelectorAll("[data-recipe-id]").forEach((card) => renderRating(card, card.dataset.recipeId));
             }})
             .catch(() => {{}});
         }}
@@ -966,6 +1019,37 @@ def render_html(
               }} finally {{
                 markBtn.disabled = false;
               }}
+            }});
+          }}
+          const ratingSection = card.querySelector(".recipe-rating");
+          const ratingStatus = ratingSection.querySelector(".rating-status");
+          ratingSection.hidden = !hosted;
+          if (hosted) {{
+            [".rate-up", ".rate-down"].forEach((sel) => {{
+              const value = sel === ".rate-up" ? "up" : "down";
+              card.querySelector(sel).onclick = async () => {{
+                const next = recipeRatings.get(id) === value ? null : value;
+                ratingSection.querySelectorAll("button").forEach((btn) => btn.disabled = true);
+                try {{
+                  const resp = await fetch(`/api/recipes/${{encodeURIComponent(id)}}/rating`, {{
+                    method: "PUT",
+                    headers: {{ "Content-Type": "application/json" }},
+                    body: JSON.stringify({{ rating: next }})
+                  }});
+                  if (!resp.ok) throw new Error();
+                  const data = await resp.json();
+                  if (data.rating) recipeRatings.set(id, data.rating);
+                  else recipeRatings.delete(id);
+                  renderRating(card, id);
+                  const gridRecipeCard = gridCard(id);
+                  if (gridRecipeCard) renderRating(gridRecipeCard, id);
+                  ratingStatus.textContent = "";
+                }} catch {{
+                  ratingStatus.textContent = {t.js('rating_save_failed')};
+                }} finally {{
+                  ratingSection.querySelectorAll("button").forEach((btn) => btn.disabled = false);
+                }}
+              }};
             }});
           }}
           if (updateUrl) {{

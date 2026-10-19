@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import load_config
@@ -43,6 +43,7 @@ from .post_repository import (
     mark_not_recipe,
     replace_manual_with_import,
 )
+from .rating_repository import all_ratings, parse_rating, set_rating
 from .recipe_image_repository import load_recipe_image
 from .recipe_page_repository import load_recipe_page
 from .recipe_photo_repository import load_recipe_photo, photo_ids
@@ -288,11 +289,12 @@ _NOT_RECIPE_PATH = re.compile(r"^/api/recipes/([^/]+)/not-recipe$")
 _RECIPES_PATH = re.compile(r"^/api/recipes$")
 _RECIPE_PATH = re.compile(r"^/api/recipes/([^/]+)$")
 _MADE_DATES_PATH = re.compile(r"^/api/recipes/([^/]+)/made-dates(?:/([^/]+))?$")
+_RATING_PATH = re.compile(r"^/api/recipes/([^/]+)/rating$")
 _TYPES_PATH = re.compile(r"^/api/recipe-types(?:/(\d+))?$")
 
 
 def make_handler(
-    root: Path, factory: sessionmaker[Session], photo_backfill: "PhotoBackfill | None" = None
+    root: Path, factory: sessionmaker[Session], photo_backfill: PhotoBackfill | None = None
 ) -> type[SimpleHTTPRequestHandler]:
     """Create a request handler bound to the cookbook directory and database."""
 
@@ -464,6 +466,16 @@ def make_handler(
                 self._json_response(200, {"recipe_ids": ids})
                 return
 
+            # GET /api/recipe-ratings
+            if request_path == "/api/recipe-ratings":
+                try:
+                    ratings = all_ratings(factory)
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to read ratings"})
+                    return
+                self._json_response(200, {"ratings": ratings})
+                return
+
             recipe_image_match = _RECIPE_IMAGE_PATH.fullmatch(request_path)
             recipe_photo_match = _RECIPE_PHOTO_PATH.fullmatch(request_path) or _LEGACY_PHOTO_PATH.fullmatch(request_path)
             if recipe_image_match or recipe_photo_match:
@@ -526,6 +538,37 @@ def make_handler(
 
         def do_PUT(self) -> None:
             if self._handle_types("PUT"):
+                return
+            rating_match = _RATING_PATH.fullmatch(unquote(urlsplit(self.path).path))
+            if rating_match:
+                recipe_id = rating_match.group(1)
+                try:
+                    if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                        raise ValueError
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 1_000:
+                        raise ValueError
+                    body = json.loads(self.rfile.read(length))
+                    if not isinstance(body, dict) or set(body) != {"rating"}:
+                        raise ValueError
+                    rating = parse_rating(body["rating"])
+                except (ValueError, UnicodeDecodeError):
+                    self._json_response(400, {"error": "Expected a JSON object with a rating of up, down or null"})
+                    return
+                try:
+                    with factory() as session:
+                        if session.get(Recipe, recipe_id) is None:
+                            self._json_response(404, {"error": "Recipe not found"})
+                            return
+                    set_rating(factory, recipe_id, rating)
+                except IntegrityError:
+                    # The recipe was deleted between the check and the write.
+                    self._json_response(404, {"error": "Recipe not found"})
+                    return
+                except SQLAlchemyError:
+                    self._json_response(503, {"error": "Unable to update recipe"})
+                    return
+                self._json_response(200, {"rating": rating})
                 return
             if urlsplit(self.path).path == "/api/recipe-state":
                 try:

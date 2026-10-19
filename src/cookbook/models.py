@@ -5,7 +5,17 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, Date, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Date,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+)
 from sqlalchemy.orm import (
     Mapped,
     MappedAsDataclass,
@@ -84,6 +94,17 @@ class RecipeMadeDate(Base):
 
     recipe_id: Mapped[str] = mapped_column(Text, ForeignKey("recipes.id", ondelete="CASCADE"), primary_key=True)
     made_on: Mapped[date] = mapped_column(Date, primary_key=True)
+
+
+class RecipeRating(Base):
+    """A thumbs up or down for a recipe. No row means unrated. Cascades on recipe delete."""
+
+    __tablename__ = "recipe_ratings"
+
+    recipe_id: Mapped[str] = mapped_column(Text, ForeignKey("recipes.id", ondelete="CASCADE"), primary_key=True)
+    rating: Mapped[str] = mapped_column(String(4))
+
+    __table_args__ = (CheckConstraint("rating IN ('up','down')", name="ck_recipe_ratings_rating"),)
 
 
 class Post(MappedAsDataclass, Base, kw_only=True):

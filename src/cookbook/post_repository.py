@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, contains_eager, sessionmaker
 
 from .database import session_scope
-from .models import Post, Recipe, RecipeMadeDate
+from .models import Post, Recipe
 
 LIZAPANELIM_HOST = "lizapanelim.com"
 
@@ -119,11 +119,13 @@ def delete_manual_recipe(factory: sessionmaker[Session], recipe_id: str) -> bool
 
 
 def replace_manual_with_import(factory: sessionmaker[Session], old_id: str, new_recipe_id: str) -> None:
-    """Move made-dates to an import, then delete the replaced manual recipe."""
+    """Move made-dates and rating to an import, then delete the replaced manual recipe."""
     from .made_date_repository import move_made_dates
+    from .rating_repository import move_rating
 
     with session_scope(factory) as session:
         move_made_dates(session, old_id, new_recipe_id)
+        move_rating(session, old_id, new_recipe_id)
         recipe = session.get(Recipe, old_id)
         if recipe is not None:
             session.delete(recipe)
