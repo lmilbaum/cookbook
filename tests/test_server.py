@@ -1,5 +1,8 @@
 """Tests for the cookbook server."""
 
+import io
+import json
+import os
 from typing import Any
 
 from cookbook import server
@@ -663,5 +666,58 @@ def test_import_by_url_returns_parsed_fields(tmp_path, monkeypatch):
     # Save with revision 2 should work (no conflict)
     new_rev = save_recipe_state(factory, state["state"], 2)
     assert new_rev == 3
+
+
+def test_trello_card_request_does_not_overwrite_database_url(tmp_path, monkeypatch) -> None:
+    """Regression: load_dotenv(override=True) in the Trello handler was overwriting
+    DATABASE_URL with the .env file's localhost value, causing import subprocesses to
+    fail with Connection Refused on every import attempt after the first Trello request."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from cookbook.database import Base
+
+    # .env contains a dev-machine DATABASE_URL pointing at localhost — correct for
+    # local dev but wrong inside Docker where Postgres is at the service hostname.
+    (tmp_path / ".env").write_text(
+        "DATABASE_URL=postgresql://user:pw@127.0.0.1:5432/db\n"
+        "TRELLO_API_KEY=key\nTRELLO_API_TOKEN=token\nTRELLO_BOARD_NAME=My Board\n"
+    )
+    # The process carries the correct Docker URL injected as an environment variable.
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pw@postgres:5432/db")
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    handler_cls = server.make_handler(tmp_path, factory)
+
+    def fake_trello(method, path, *args, **kwargs):
+        if path == "members/me/boards":
+            return [{"id": "b1", "name": "My Board"}]
+        if path == "boards/b1/lists":
+            return [{"id": "l1", "name": "Tasks"}]
+        if path == "lists/l1/cards":
+            return []
+        if path == "cards":
+            return {"id": "c1", "url": "https://trello.com/c/c1"}
+        if path == "cards/c1/checklists":
+            return {"id": "cl1"}
+        return {"id": "ci1"}
+
+    monkeypatch.setattr(server, "_trello_request", fake_trello)
+
+    body = json.dumps([{"id": "1", "name": "Milk", "done": False}]).encode()
+    handler = object.__new__(handler_cls)
+    handler.path = "/api/trello/cards"
+    handler.headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
+    handler.rfile = io.BytesIO(body)
+    responses: list[tuple[int, Any]] = []
+    handler._json_response = lambda status, payload: responses.append((status, payload))
+    handler.do_POST()
+
+    assert responses[-1][0] == 201
+    # DATABASE_URL must still point to the Docker Postgres host, not localhost.
+    assert os.environ["DATABASE_URL"] == "postgresql+psycopg://user:pw@postgres:5432/db"
+    engine.dispose()
 
     engine.dispose()

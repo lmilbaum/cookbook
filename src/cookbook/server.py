@@ -19,7 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
@@ -795,7 +795,16 @@ def make_handler(
                 self._json_response(400, {"error": "Invalid shopping list"})
                 return
             try:
-                load_dotenv(root / ".env", override=True)
+                # Re-read Trello credentials so they can be rotated without a
+                # server restart. Only update the four Trello keys — never the
+                # full env — so DATABASE_URL and other process-level vars are
+                # not overwritten (regression: override=True was replacing the
+                # Docker postgres:5432 URL with localhost from .env, causing
+                # every subsequent import subprocess to fail).
+                _trello_keys = {"TRELLO_API_KEY", "TRELLO_API_TOKEN", "TRELLO_BOARD_NAME", "TRELLO_LIST_NAME"}
+                for _k, _v in dotenv_values(root / ".env").items():
+                    if _k in _trello_keys:
+                        os.environ[_k] = _v
                 card = _create_trello_card(items)
             except RuntimeError as error:
                 self._json_response(503, {"error": str(error)})
