@@ -35,7 +35,7 @@ def _open(page, url: str) -> None:
     page.route(f"{BASE}/api/recipe-types", lambda route: route.fulfill(json=[]))
     page.route(f"{BASE}/api/import-post", lambda route: route.fulfill(json={"status": "idle", "message": ""}))
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html([_recipe()], "example", "favicon.svg")))
+        content_type="text/html", body=render_html([_recipe()], "favicon.svg", locale="he")))
     page.goto(url)
     page.locator("[data-recipe-id]").first.wait_for()
 
@@ -68,7 +68,7 @@ def test_shopping_item_names_are_isolated_from_the_page_direction(page) -> None:
     items = [{"id": "1", "name": "Eggs (12)", "done": False}, {"id": "2", "name": "חלב", "done": False}]
     page.route(f"{BASE}/api/shopping-list", lambda route: route.fulfill(json={"items": items, "revision": 1}))
     page.route(f"{BASE}/shopping_list.html", lambda route: route.fulfill(
-        content_type="text/html", body=render_shopping_list_html("favicon.svg")))
+        content_type="text/html", body=render_shopping_list_html("favicon.svg", locale="he")))
     page.goto(f"{BASE}/shopping_list.html")
     page.wait_for_function("!document.getElementById('shopping-item-input').disabled")
 

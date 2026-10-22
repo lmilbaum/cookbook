@@ -74,13 +74,14 @@ def test_clicking_a_recipe_opens_a_popup_over_the_home_page(page) -> None:
     assert popup.evaluate("dialog => dialog.open")
     assert page.url == f"{BASE}/index.html?recipe=r2"
     assert page.locator("#recipe-title").input_value() == "Soup"
-    assert popup.locator(".recipe-ingredients").is_visible()
+    assert popup.locator("#recipe-form").is_visible()
     assert page.locator("#recipe-grid [data-recipe-id]:visible").count() == 2  # home page stays behind
 
 
 def test_recipe_images_have_identical_square_frames_in_grid_and_popup(page) -> None:
     _serve(page)
     page.goto(f"{BASE}/index.html")
+    page.locator("#recipe-grid [data-recipe-id]").first.wait_for()
     images = page.locator("#recipe-grid .card-image img")
     assert images.count() == 2
     images.nth(1).wait_for()

@@ -66,7 +66,7 @@ def _setup_page(page, recipes, made_recipe_ids=None, made_recipes_status=None):
     page.route(f"{BASE}/api/import-post", lambda route: route.fulfill(json={"status": "idle", "message": ""}))
     page.route(f"{BASE}/api/recipe-types", lambda route: route.fulfill(json=[]))
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html(recipes, "favicon.svg")))
+        content_type="text/html", body=render_html(recipes, "favicon.svg", locale="he")))
     page.goto(f"{BASE}/index.html")
     page.locator("#recipe-grid").wait_for()
     return state

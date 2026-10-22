@@ -41,7 +41,7 @@ def _open_recipe_page(page, existing_types):
     page.route(f"{BASE}/api/recipe-state", recipe_state)
     page.route(f"{BASE}/api/import-post", lambda route: route.fulfill(json={"status": "idle", "message": ""}))
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html([_recipe()], "favicon.svg")))
+        content_type="text/html", body=render_html([_recipe()], "favicon.svg", locale="he")))
     page.goto(f"{BASE}/index.html?recipe=r1")
     page.locator("#recipe-type").wait_for()
     return calls
@@ -102,7 +102,7 @@ def test_all_recipes_show_initially_and_filters_update_immediately(page):
     )
     _open_recipe_page(page, ["עוגה"])
     page.route(f"{BASE}/index.html*", lambda route: route.fulfill(
-        content_type="text/html", body=render_html([_recipe(), other], "example", "favicon.svg")))
+        content_type="text/html", body=render_html([_recipe(), other], "favicon.svg")))
     page.goto(f"{BASE}/index.html")
     page.locator("#recipe-search").wait_for()
     assert page.get_by_role("button", name="חיפוש").count() == 0

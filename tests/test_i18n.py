@@ -36,9 +36,9 @@ def _placeholders(text: str) -> set[str]:
     return set(re.findall(r"\{(\w+)\}", text))
 
 
-def test_default_locale_is_hebrew() -> None:
-    assert DEFAULT_LOCALE == "he"
-    assert 'lang="he" dir="rtl"' in render_shopping_list_html("favicon.svg")
+def test_default_locale_is_english() -> None:
+    assert DEFAULT_LOCALE == "en"
+    assert 'lang="en" dir="ltr"' in render_shopping_list_html("favicon.svg")
 
 
 def test_every_locale_defines_the_same_keys() -> None:
