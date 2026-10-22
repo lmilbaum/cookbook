@@ -1,6 +1,8 @@
 """Open a recipe as a popup over the home page and return home on save."""
 from __future__ import annotations
 
+from playwright.sync_api import expect
+
 from cookbook.models import Post, Recipe
 from cookbook.recipe_state_repository import valid_state
 from cookbook.site_pages import render_html
@@ -155,6 +157,7 @@ def test_notes_typed_in_the_popup_keep_the_type_chosen_there(page) -> None:
     page.locator("#recipe-type").fill("Soups")
     page.locator("#recipe-type").press("Enter")
     page.wait_for_function("document.getElementById('save-status').textContent !== ''")
+    page.locator("#recipe-page .recipe-notes summary").click()
     page.locator("#recipe-page .recipe-notes textarea").fill("Less salt")
     page.wait_for_function("document.querySelector('#recipe-page .recipe-notes-status').textContent !== ''")
     page.wait_for_timeout(100)
@@ -162,3 +165,42 @@ def test_notes_typed_in_the_popup_keep_the_type_chosen_there(page) -> None:
     saved = store["puts"][-1]["overrides"]["r1"]
     assert saved["type"] == "Soups"
     assert saved["notes"] == "Less salt"
+
+
+def test_popup_secondary_sections_collapsed_by_default(page) -> None:
+    _serve(page)
+    page.goto(f"{BASE}/index.html")
+    page.locator("#recipe-grid .recipe-detail-link", has_text="Salad").click()
+    page.locator("#recipe-page").wait_for(state="visible")
+    expect(page.locator("#recipe-page #recipe-form")).to_be_visible()
+    expect(page.locator("#recipe-page .mark-made")).to_be_visible()
+    expect(page.locator("#recipe-page .rate-up")).to_be_visible()
+    expect(page.locator("#recipe-page .recipe-notes textarea")).to_be_hidden()
+    expect(page.locator("#recipe-page .recipe-prerequisite select")).to_be_hidden()
+    page.locator("#recipe-page .recipe-notes summary").click()
+    expect(page.locator("#recipe-page .recipe-notes textarea")).to_be_visible()
+
+
+def test_notes_and_prerequisite_panels_open_only_when_they_hold_data(page) -> None:
+    store = _serve(page)
+    store["state"] = {
+        "overrides": {
+            "r1": {
+                "id": "r1", "title": "Salad", "sourceUrl": "", "source": "lizapanelim",
+                "recipeUrl": "", "recipeName": "", "recipeUrls": [], "recipeNames": [], "imageUrl": "",
+                "ingredients": [], "instructions": "", "prerequisiteId": "r2", "notes": "Less salt",
+            }
+        },
+        "custom": [],
+    }
+    page.goto(f"{BASE}/index.html?recipe=r1")
+    popup = page.locator("#recipe-page")
+    expect(popup).to_be_visible()
+    expect(popup.locator(".recipe-notes")).to_have_attribute("open", "")
+    expect(popup.locator(".recipe-prerequisite-panel")).to_have_attribute("open", "")
+
+    page.goto(f"{BASE}/index.html?recipe=r2")
+    expect(popup).to_be_visible()
+    expect(page.locator("#recipe-title")).to_have_value("Soup")
+    expect(popup.locator(".recipe-notes")).not_to_have_attribute("open", "")
+    expect(popup.locator(".recipe-prerequisite-panel")).not_to_have_attribute("open", "")

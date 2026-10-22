@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 
 from cookbook.i18n import Translator as get_translator
@@ -138,15 +139,32 @@ class RenderHtmlTests(unittest.TestCase):
         self.assertIn('ingredientsBox.hidden = false', document)
         self.assertIn(': [{ name: "", varieties: "", amount: "" }]', document)
         self.assertIn(r'.split(/\r?\n/)', document)
-        self.assertIn('<section class="recipe-notes"><h3>Notes</h3><textarea dir="auto" aria-label="Recipe notes"></textarea>', document)
+        self.assertIn('<details class="recipe-disclosure recipe-notes"><summary>Notes</summary><textarea dir="auto" aria-label="Recipe notes"></textarea>', document)
         self.assertIn('.edit-recipe { display: block; margin: 0 0 10px; margin-inline-end: auto; padding: 0; background: transparent; color: #8db7ff;', document)
         self.assertIn('<h3>Instructions</h3><pre dir="auto"></pre>', document)
-        self.assertIn('<span>Requires preparing</span><select aria-label="Requires preparing">', document)
+        self.assertIn('<details class="recipe-disclosure recipe-prerequisite-panel"><summary>Requires preparing</summary><div class="recipe-prerequisite"><select aria-label="Requires preparing">', document)
         self.assertIn('class="prerequisite-link">Go to recipe</a>', document)
         self.assertIn('`index.html?recipe=${encodeURIComponent(prerequisiteSelect.value)}`', document)
         self.assertIn('.recipe-prerequisite { display: flex; align-items: center;', document)
         self.assertIn('event.target.closest(".recipe-prerequisite select")', document)
         self.assertIn('prerequisiteId: select.value', document)
+
+    def test_recipe_popup_tucks_secondary_sections_into_collapsed_disclosures(self) -> None:
+        document = render_html([make_recipe()], "favicon.svg")
+
+        self.assertIn('<details class="recipe-disclosure recipe-notes">', document)
+        self.assertIn('<details class="recipe-disclosure recipe-prerequisite-panel">', document)
+        self.assertIn('<details class="recipe-disclosure made-dates-history">', document)
+        self.assertIn('<div class="recipe-quick-actions" hidden>', document)
+        self.assertIn(".grid .recipe-prerequisite-panel,", document)
+        self.assertIn(".grid .recipe-quick-actions,", document)
+        self.assertIn('<span class="made-dates-count"></span>', document)
+        self.assertIn('card.querySelector(".recipe-notes").open', document)
+        self.assertIn('card.querySelector(".recipe-quick-actions").hidden = !hosted', document)
+        template_start = document.find("card.innerHTML = '")
+        template_end = document.find('<div class="card-image"></div>', template_start)
+        template = document[template_start:template_end]
+        self.assertFalse(re.search(r"<details[^>]*\sopen", template))
 
     def test_recipe_link_shows_the_linked_recipe_name(self) -> None:
         document = render_html(
@@ -383,7 +401,7 @@ def test_rating_badge_is_rendered_and_visible_in_grid() -> None:
     # The grid hides the popup controls but keeps the badge visible.
     grid_rule = document.split(".grid .edit-recipe { display: none; }")[0]
     grid_selectors = grid_rule[grid_rule.rindex(".grid .card-meta,"):]
-    assert ".grid .recipe-rating," in grid_selectors
+    assert ".grid .recipe-quick-actions," in grid_selectors
     assert "rating-badge" not in grid_selectors
 
     # Ratings are loaded separately, so recipe objects never carry one.

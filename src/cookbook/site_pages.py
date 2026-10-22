@@ -277,10 +277,11 @@ def render_html(
         f'<div class="card-meta" aria-label="{t.html("recipe_links")}">'
         f'<span class="meta-label">{t.html("filter_source")}</span><p class="link-row source-link"></p>'
         f'<span class="meta-label">{t.html("recipes")}</span><div class="recipe-links"></div></div></header>'
-        f'<div class="recipe-prerequisite"><span>{t.html("prerequisite")}</span>'
+        f'<details class="recipe-disclosure recipe-prerequisite-panel"><summary>{t.html("prerequisite")}</summary>'
+        f'<div class="recipe-prerequisite">'
         f'<select aria-label="{t.html("prerequisite")}"></select>'
         f'<a class="prerequisite-link">{t.html("to_recipe")}</a>'
-        '<span class="prerequisite-status" aria-live="polite"></span></div>'
+        '<span class="prerequisite-status" aria-live="polite"></span></div></details>'
         f'<section class="recipe-ingredients"><h3>{t.html("ingredients")}</h3>'
         '<table class="ingredients-table"><thead><tr>'
         f'<th scope="col">{t.html("ingredient_name")}</th>'
@@ -288,21 +289,24 @@ def render_html(
         f'<th scope="col">{t.html("ingredient_amount")}</th>'
         '</tr></thead><tbody></tbody></table></section>'
         f'<section class="recipe-instructions"><h3>{t.html("instructions")}</h3><pre dir="auto"></pre></section>'
-        f'<section class="recipe-notes"><h3>{t.html("notes")}</h3>'
+        f'<details class="recipe-disclosure recipe-notes"><summary>{t.html("notes")}</summary>'
         f'<textarea dir="auto" aria-label="{t.html("recipe_notes")}"></textarea>'
-        '<p class="recipe-notes-status" aria-live="polite"></p></section>'
+        '<p class="recipe-notes-status" aria-live="polite"></p></details>'
         f'<button class="edit-recipe" type="button">{t.html("edit_recipe")}</button>'
-        f'<section class="recipe-rating" role="group" aria-label="{t.html("rating")}" hidden>'
+        '<div class="recipe-quick-actions" hidden>'
+        f'<section class="recipe-rating" role="group" aria-label="{t.html("rating")}">'
         f'<button type="button" class="rate-up" aria-pressed="false" aria-label="{t.html("rate_up")}">{_THUMB_SVG}</button>'
         f'<button type="button" class="rate-down" aria-pressed="false" aria-label="{t.html("rate_down")}">{_THUMB_SVG}</button>'
         '<p class="rating-status" aria-live="polite"></p></section>'
-        f'<section class="recipe-made-dates" aria-label="{t.html("made_dates")}" hidden>'
+        f'<section class="recipe-made-dates" aria-label="{t.html("made_dates")}">'
         f'<div class="made-dates-input">'
         f'<button type="button" class="mark-made" aria-label="{t.html("mark_made")}">{t.html("mark_made")}</button>'
         f'</div>'
         f'<p class="made-dates-status" aria-live="polite"></p>'
-        f'<ol class="made-dates-list" role="list"></ol>'
+        f'<details class="recipe-disclosure made-dates-history"><summary>{t.html("made_dates")} <span class="made-dates-count"></span></summary>'
+        f'<ol class="made-dates-list" role="list"></ol></details>'
         f'</section>'
+        '</div>'
         '<div class="card-image"></div>'
     )
 
@@ -371,12 +375,11 @@ def render_html(
       .card-title a {{ color: inherit; text-decoration: none; }}
       .card-title a:hover {{ color: #a8c8ff; }}
       .grid .card-meta,
-      .grid .recipe-prerequisite,
+      .grid .recipe-prerequisite-panel,
+      .grid .recipe-quick-actions,
       .grid .recipe-ingredients,
       .grid .recipe-instructions,
       .grid .recipe-notes,
-      .grid .recipe-rating,
-      .grid .recipe-made-dates,
       .grid .edit-recipe {{ display: none; }}
       .grid .card-header {{ margin-bottom: 12px; }}
       .card-image {{ width: min(220px, 100%); aspect-ratio: 1 / 1; }}
@@ -389,14 +392,21 @@ def render_html(
       .recipe-page .recipe-form {{ margin-top: 16px; border: 1px solid #303644; border-radius: 10px; background: #12151b; }}
       .recipe-page .recipe-form h2 {{ font-size: 1.05rem; }}
       .recipe-notes {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
-      .recipe-notes h3 {{ margin: 0 0 8px; font-size: 1rem; }}
+      .recipe-disclosure > summary {{ cursor: pointer; color: #cbd1dc; font-weight: 600; list-style: none; }}
+      .recipe-disclosure > summary::-webkit-details-marker {{ display: none; }}
+      .recipe-disclosure[open] > summary {{ margin-bottom: 8px; }}
+      .recipe-disclosure > summary:focus-visible {{ outline: 2px solid #8db7ff; outline-offset: 3px; }}
+      .recipe-prerequisite-panel {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
+      .recipe-prerequisite-panel .recipe-prerequisite {{ margin: 0; }}
+      .recipe-quick-actions:not([hidden]) {{ display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; margin: 14px 0; }}
       .recipe-notes textarea {{ box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; border: 1px solid #3a414f; border-radius: 7px; padding: 10px 12px; background: #171a21; color: #eceef3; font: inherit; }}
       .recipe-notes-status {{ min-height: 1.25em; margin: 6px 0 0; color: #92d3a2; font-size: .85rem; }}
-      .recipe-made-dates {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
-      .made-dates-input {{ display: flex; gap: 8px; margin-bottom: 8px; }}
+      .recipe-made-dates {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }}
+      .made-dates-input {{ display: flex; gap: 8px; margin-bottom: 0; }}
       .mark-made {{ padding: 8px 12px; background: #8db7ff; color: #101218; font-weight: 600; border-radius: 6px; border: 0; cursor: pointer; }}
       .mark-made:disabled {{ opacity: 0.6; cursor: not-allowed; }}
-      .made-dates-status {{ min-height: 1.25em; margin: 0 0 8px; color: #92d3a2; font-size: .85rem; }}
+      .made-dates-status {{ min-height: 0; margin: 0; color: #92d3a2; font-size: .85rem; }}
+      .made-dates-history[open] {{ flex-basis: 100%; }}
       .made-dates-list {{ list-style: none; padding: 0; margin: 0; }}
       .made-dates-list li {{ display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #3a414f; }}
       .made-dates-list li:last-child {{ border-bottom: 0; }}
@@ -407,14 +417,14 @@ def render_html(
       .rating-badge.up {{ color: #92d3a2; }}
       .rating-badge.down {{ color: #e58a8f; }}
       .rating-badge.down svg {{ transform: scaleY(-1); }}
-      .recipe-rating {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
+      .recipe-rating {{ margin: 0; }}
       .recipe-rating button {{ display: inline-flex; align-items: center; margin-inline-end: 8px; padding: 6px 10px; background: transparent; color: #eceef3; border: 1px solid #3a414f; border-radius: 6px; cursor: pointer; }}
       .recipe-rating button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
       .recipe-rating [aria-pressed="true"] {{ background: #1d2636; }}
       .recipe-rating .rate-up[aria-pressed="true"] {{ color: #92d3a2; border-color: #92d3a2; }}
       .recipe-rating .rate-down[aria-pressed="true"] {{ color: #e58a8f; border-color: #e58a8f; }}
       .recipe-rating .rate-down svg {{ transform: scaleY(-1); }}
-      .rating-status {{ min-height: 1.25em; margin: 8px 0 0; color: #92d3a2; font-size: .85rem; }}
+      .rating-status {{ min-height: 0; margin: 4px 0 0; color: #92d3a2; font-size: .85rem; }}
       .recipe-instructions {{ margin: 14px 0; padding: 12px; border-radius: 8px; background: #101218; }}
       .recipe-instructions h3 {{ margin: 0 0 8px; font-size: 1rem; }}
       .recipe-instructions pre {{ margin: 0; }}
@@ -948,13 +958,16 @@ def render_html(
         const renderMadeDates = async (card, recipeId) => {{
           const section = card.querySelector(".recipe-made-dates");
           const list = section.querySelector(".made-dates-list");
+          const count = section.querySelector(".made-dates-count");
           const status = section.querySelector(".made-dates-status");
           list.replaceChildren();
+          count.textContent = "";
           status.textContent = "";
           try {{
             const resp = await fetch(`/api/recipes/${{encodeURIComponent(recipeId)}}/made-dates`);
             if (!resp.ok) throw new Error();
             const data = await resp.json();
+            count.textContent = data.dates.length ? `(${{data.dates.length}})` : "";
             if (data.dates.length) madeRecipeIds.add(recipeId);
             else madeRecipeIds.delete(recipeId);
             applySourceFilter();
@@ -997,8 +1010,10 @@ def render_html(
           card.append(form);
           recipePageCard.replaceChildren(card);
           openEditor(recipe, recipe.added_via === "manual", true);
+          card.querySelector(".recipe-quick-actions").hidden = !hosted;
+          card.querySelector(".recipe-notes").open = !!(recipe.notes || "").trim();
+          card.querySelector(".recipe-prerequisite-panel").open = !!card.querySelector(".recipe-prerequisite select").value;
           const madeSection = card.querySelector(".recipe-made-dates");
-          madeSection.hidden = !hosted;
           if (hosted) {{
             renderMadeDates(card, id);
             const markBtn = madeSection.querySelector(".mark-made");
@@ -1023,7 +1038,6 @@ def render_html(
           }}
           const ratingSection = card.querySelector(".recipe-rating");
           const ratingStatus = ratingSection.querySelector(".rating-status");
-          ratingSection.hidden = !hosted;
           if (hosted) {{
             [".rate-up", ".rate-down"].forEach((sel) => {{
               const value = sel === ".rate-up" ? "up" : "down";
