@@ -302,6 +302,7 @@ def render_html(
         f'<div class="made-dates-input">'
         f'<button type="button" class="mark-made" aria-label="{t.html("mark_made")}">{t.html("mark_made")}</button>'
         f'</div>'
+        f'<details class="recipe-disclosure made-date-other"><summary>{t.html("made_other_date")}</summary><div class="made-date-other-input"><input type="date" class="made-date-input" max="9999-12-31" aria-label="{t.html("made_date_input")}" /><button type="button" class="add-made-date">{t.html("add_made_date")}</button></div></details>'
         f'<p class="made-dates-status" aria-live="polite"></p>'
         f'<details class="recipe-disclosure made-dates-history"><summary>{t.html("made_dates")} <span class="made-dates-count"></span></summary>'
         f'<ol class="made-dates-list" role="list"></ol></details>'
@@ -405,6 +406,11 @@ def render_html(
       .made-dates-input {{ display: flex; gap: 8px; margin-bottom: 0; }}
       .mark-made {{ padding: 8px 12px; background: #8db7ff; color: #101218; font-weight: 600; border-radius: 6px; border: 0; cursor: pointer; }}
       .mark-made:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+      .made-date-other[open] {{ flex-basis: 100%; }}
+      .made-date-other-input {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }}
+      .made-date-input {{ padding: 7px 10px; border: 1px solid #3a414f; border-radius: 6px; background: #171a21; color: #eceef3; font: inherit; color-scheme: dark; }}
+      .add-made-date {{ padding: 8px 12px; background: #8db7ff; color: #101218; font-weight: 600; border-radius: 6px; border: 0; cursor: pointer; }}
+      .add-made-date:disabled {{ opacity: 0.6; cursor: not-allowed; }}
       .made-dates-status {{ min-height: 0; margin: 0; color: #92d3a2; font-size: .85rem; }}
       .made-dates-history[open] {{ flex-basis: 100%; }}
       .made-dates-list {{ list-style: none; padding: 0; margin: 0; }}
@@ -412,6 +418,11 @@ def render_html(
       .made-dates-list li:last-child {{ border-bottom: 0; }}
       .remove-made-date {{ padding: 4px 8px; background: transparent; color: #8db7ff; border: 0; cursor: pointer; font-weight: 600; }}
       .remove-made-date:hover {{ color: #a8c8ff; }}
+      .made-date-confirm {{ display: inline-flex; align-items: center; gap: 6px; }}
+      .confirm-remove-made-date {{ padding: 4px 8px; background: transparent; color: #e58a8f; border: 0; cursor: pointer; font-weight: 600; }}
+      .confirm-remove-made-date:hover {{ color: #f0a5a9; }}
+      .cancel-remove-made-date {{ padding: 4px 8px; background: transparent; color: #8db7ff; border: 0; cursor: pointer; font-weight: 600; }}
+      .cancel-remove-made-date:hover {{ color: #a8c8ff; }}
       .rating-badge {{ display: inline-flex; align-items: center; font-size: 1.2em; }}
       .rating-badge[hidden] {{ display: none; }}
       .rating-badge.up {{ color: #92d3a2; }}
@@ -987,14 +998,37 @@ def render_html(
               removeBtn.className = "remove-made-date";
               removeBtn.textContent = "−";
               removeBtn.setAttribute("aria-label", fmt({t.js('remove_made_date')}, {{ date: formatMadeDate(date) }}));
-              removeBtn.addEventListener("click", async () => {{
-                try {{
-                  const delResp = await fetch(`/api/recipes/${{encodeURIComponent(recipeId)}}/made-dates/${{date}}`, {{ method: "DELETE" }});
-                  if (!delResp.ok) throw new Error();
-                  await renderMadeDates(card, recipeId);
-                }} catch {{
-                  status.textContent = {t.js('made_dates_save_failed')};
-                }}
+              removeBtn.addEventListener("click", () => {{
+                const confirmBtn = document.createElement("button");
+                confirmBtn.type = "button";
+                confirmBtn.className = "confirm-remove-made-date";
+                confirmBtn.textContent = {t.js('remove')};
+                confirmBtn.setAttribute("aria-label", fmt({t.js('confirm_remove_made_date')}, {{ date: formatMadeDate(date) }}));
+                const cancelBtn = document.createElement("button");
+                cancelBtn.type = "button";
+                cancelBtn.className = "cancel-remove-made-date";
+                cancelBtn.textContent = {t.js('cancel')};
+                const confirmSpan = document.createElement("span");
+                confirmSpan.className = "made-date-confirm";
+                confirmSpan.append(confirmBtn, cancelBtn);
+                cancelBtn.addEventListener("click", () => {{
+                  confirmSpan.replaceWith(removeBtn);
+                  removeBtn.focus();
+                }});
+                confirmBtn.addEventListener("click", async () => {{
+                  confirmBtn.disabled = true;
+                  cancelBtn.disabled = true;
+                  try {{
+                    const delResp = await fetch(`/api/recipes/${{encodeURIComponent(recipeId)}}/made-dates/${{date}}`, {{ method: "DELETE" }});
+                    if (!delResp.ok) throw new Error();
+                    await renderMadeDates(card, recipeId);
+                  }} catch {{
+                    status.textContent = {t.js('made_dates_save_failed')};
+                    confirmSpan.replaceWith(removeBtn);
+                  }}
+                }});
+                removeBtn.replaceWith(confirmSpan);
+                confirmBtn.focus();
               }});
               item.append(timeEl, removeBtn);
               list.append(item);
@@ -1017,10 +1051,12 @@ def render_html(
           if (hosted) {{
             renderMadeDates(card, id);
             const markBtn = madeSection.querySelector(".mark-made");
+            const addBtn = madeSection.querySelector(".add-made-date");
+            const dateInput = madeSection.querySelector(".made-date-input");
             const status = madeSection.querySelector(".made-dates-status");
-            markBtn.addEventListener("click", async () => {{
-              const date = localToday();
+            const saveMadeDate = async (date) => {{
               markBtn.disabled = true;
+              addBtn.disabled = true;
               try {{
                 const resp = await fetch(`/api/recipes/${{encodeURIComponent(id)}}/made-dates`, {{
                   method: "POST",
@@ -1029,11 +1065,23 @@ def render_html(
                 }});
                 if (!resp.ok) throw new Error();
                 await renderMadeDates(card, id);
+                return true;
               }} catch {{
                 status.textContent = {t.js('made_dates_save_failed')};
+                return false;
               }} finally {{
                 markBtn.disabled = false;
+                addBtn.disabled = false;
               }}
+            }};
+            markBtn.addEventListener("click", () => saveMadeDate(localToday()));
+            addBtn.addEventListener("click", async () => {{
+              if (!dateInput.value || !dateInput.checkValidity()) {{
+                status.textContent = {t.js('made_date_invalid')};
+                dateInput.focus();
+                return;
+              }}
+              if (await saveMadeDate(dateInput.value)) dateInput.value = "";
             }});
           }}
           const ratingSection = card.querySelector(".recipe-rating");

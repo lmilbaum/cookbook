@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime
+import json
+import re
+from datetime import date, datetime
 
 import pytest
 from playwright.sync_api import expect
@@ -11,12 +13,15 @@ from sqlalchemy.orm import sessionmaker
 
 from cookbook import server
 from cookbook.database import Base, session_scope
-from cookbook.made_date_repository import list_made_dates
+from cookbook.i18n import Translator
+from cookbook.made_date_repository import add_made_date, list_made_dates
 
 from cookbook.models import Post, Recipe
 from cookbook.site_pages import render_html
 
 BASE = "http://cookbook.test"
+# Playwright globs do not match across "/", so DELETE paths need an explicit pattern.
+MADE_DATES_URL = re.compile(re.escape(BASE) + r"/api/recipes/[^/]+/made-dates(/[^/]+)?$")
 
 
 def _recipe(recipe_id: str, title: str) -> Recipe:
@@ -138,7 +143,7 @@ def test_marking_a_recipe_made_in_the_popup_updates_the_filter(page):
     # Open popup for r1 and mark as made
     page.locator(".card-title a", has_text="Salad").click()
     page.locator("#recipe-page").wait_for()
-    expect(page.locator("#recipe-page input[type=date]")).to_have_count(0)
+    expect(page.locator("#recipe-page .made-date-input")).to_be_hidden()
     page.locator("#recipe-page .mark-made").click()
 
     # Wait for the mark to be processed (date appears in the list)
@@ -216,7 +221,7 @@ def test_mark_as_made_saves_local_click_date(
 
     page.route(f"{BASE}/api/recipes/r1/made-dates", save_made_date)
     page.locator(".card-title a", has_text="Salad").click()
-    expect(page.locator("#recipe-page input[type=date]")).to_have_count(0)
+    expect(page.locator("#recipe-page .made-date-input")).to_be_hidden()
     if clicked_at:
         page.clock.set_fixed_time(datetime.fromisoformat(clicked_at))
     button = page.locator("#recipe-page .mark-made")
@@ -237,4 +242,162 @@ def test_mark_as_made_saves_local_click_date(
     assert len(bodies) == 2
     expect(history).to_have_count(1)
     assert list_made_dates(factory, "r1") == [expected_date]
+    engine.dispose()
+
+
+def _seed_database(recipe, made_dates=()):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with session_scope(factory) as session:
+        session.add(recipe)
+    for made_on in made_dates:
+        add_made_date(factory, recipe.id, date.fromisoformat(made_on))
+    return engine, factory
+
+
+def _route_made_dates_to_server(page, tmp_path, factory, requests):
+    """Send made-date calls through the real server handler, recording (method, path, body)."""
+
+    def route_made_dates(route):
+        request = route.request
+        path = request.url.removeprefix(BASE)
+        body = (request.post_data or "").encode()
+        requests.append((request.method, path, json.loads(body) if body else None))
+        handler = object.__new__(server.make_handler(tmp_path, factory))
+        handler.path = path
+        handler.headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        responses = []
+        handler._json_response = lambda status, payload: responses.append((status, payload))
+        getattr(handler, f"do_{request.method}")()
+        status, payload = responses[-1]
+        route.fulfill(status=status, json=payload)
+
+    page.route(MADE_DATES_URL, route_made_dates)
+
+
+def _writes(requests):
+    return [request for request in requests if request[0] != "GET"]
+
+
+@pytest.mark.parametrize("chosen_date", ["2025-12-31", "2027-03-01"])
+def test_other_date_saves_the_chosen_past_or_future_date(page, tmp_path, chosen_date):
+    """The Other date disclosure records any past or future date the user picks."""
+    page = page.context.browser.new_page(timezone_id="UTC")
+    page.clock.set_fixed_time(datetime.fromisoformat("2026-09-15T12:00:00+00:00"))
+    recipe = _recipe("r1", "Salad")
+    engine, factory = _seed_database(recipe)
+    _setup_page(page, [recipe])
+    requests = []
+    _route_made_dates_to_server(page, tmp_path, factory, requests)
+
+    page.locator(".card-title a", has_text="Salad").click()
+    page.locator("#recipe-page .made-date-other summary").click()
+    page.locator("#recipe-page .made-date-input").fill(chosen_date)
+    page.locator("#recipe-page .add-made-date").click()
+
+    expect(page.locator("#recipe-page .made-dates-list li time")).to_have_attribute("datetime", chosen_date)
+    assert _writes(requests) == [("POST", "/api/recipes/r1/made-dates", {"date": chosen_date})]
+    assert list_made_dates(factory, "r1") == [chosen_date]
+    expect(page.locator("#recipe-page .made-date-input")).to_have_value("")
+    engine.dispose()
+
+
+def test_other_date_requires_a_value_before_saving(page, tmp_path):
+    """Adding an empty Other date shows a validation message and saves nothing."""
+    locale = "he"
+    page = page.context.browser.new_page(timezone_id="UTC")
+    page.clock.set_fixed_time(datetime.fromisoformat("2026-09-15T12:00:00+00:00"))
+    recipe = _recipe("r1", "Salad")
+    engine, factory = _seed_database(recipe)
+    _setup_page(page, [recipe])
+    requests = []
+    _route_made_dates_to_server(page, tmp_path, factory, requests)
+
+    page.locator(".card-title a", has_text="Salad").click()
+    page.locator("#recipe-page .made-date-other summary").click()
+    page.locator("#recipe-page .add-made-date").click()
+
+    expect(page.locator("#recipe-page .made-dates-status")).to_have_text(
+        Translator(locale).text("made_date_invalid")
+    )
+    assert _writes(requests) == []
+    assert list_made_dates(factory, "r1") == []
+    engine.dispose()
+
+
+def test_removing_a_made_date_requires_confirmation(page, tmp_path):
+    """The minus button asks for a second click before deleting a made date."""
+    page = page.context.browser.new_page(timezone_id="UTC")
+    page.clock.set_fixed_time(datetime.fromisoformat("2026-09-15T12:00:00+00:00"))
+    recipe = _recipe("r1", "Salad")
+    engine, factory = _seed_database(recipe, made_dates=["2026-09-01", "2026-09-10"])
+    _setup_page(page, [recipe])
+    requests = []
+    _route_made_dates_to_server(page, tmp_path, factory, requests)
+
+    page.locator(".card-title a", has_text="Salad").click()
+    page.locator("#recipe-page .made-dates-history summary").click()
+    items = page.locator("#recipe-page .made-dates-list li")
+    expect(items).to_have_count(2)
+    first_date = items.first.locator("time").get_attribute("datetime")
+
+    page.locator("#recipe-page .remove-made-date").first.click()
+    confirm = page.locator("#recipe-page .confirm-remove-made-date")
+    expect(confirm).to_be_visible()
+    expect(confirm).to_be_focused()
+    assert _writes(requests) == []
+    assert sorted(list_made_dates(factory, "r1")) == ["2026-09-01", "2026-09-10"]
+
+    page.locator("#recipe-page .cancel-remove-made-date").click()
+    expect(page.locator("#recipe-page .confirm-remove-made-date")).to_have_count(0)
+    expect(page.locator("#recipe-page .remove-made-date")).to_have_count(2)
+    assert _writes(requests) == []
+
+    page.locator("#recipe-page .remove-made-date").first.click()
+    page.locator("#recipe-page .confirm-remove-made-date").click()
+    expect(items).to_have_count(1)
+    remaining = [made_on for made_on in ["2026-09-01", "2026-09-10"] if made_on != first_date]
+    assert list_made_dates(factory, "r1") == remaining
+    assert _writes(requests) == [("DELETE", f"/api/recipes/r1/made-dates/{first_date}", None)]
+    engine.dispose()
+
+
+def test_failed_confirmed_removal_restores_the_remove_button(page, tmp_path):
+    """A failed delete shows the save error and puts the minus button back."""
+    locale = "he"
+    page = page.context.browser.new_page(timezone_id="UTC")
+    page.clock.set_fixed_time(datetime.fromisoformat("2026-09-15T12:00:00+00:00"))
+    recipe = _recipe("r1", "Salad")
+    engine, factory = _seed_database(recipe, made_dates=["2026-09-01", "2026-09-10"])
+    _setup_page(page, [recipe])
+    requests = []
+    _route_made_dates_to_server(page, tmp_path, factory, requests)
+
+    def fail_delete(route):
+        if route.request.method != "DELETE":
+            route.fallback()
+            return
+        requests.append(("DELETE", route.request.url.removeprefix(BASE), None))
+        route.fulfill(status=503, json={"error": "Unable to update recipe"})
+
+    page.route(MADE_DATES_URL, fail_delete)
+
+    page.locator(".card-title a", has_text="Salad").click()
+    page.locator("#recipe-page .made-dates-history summary").click()
+    items = page.locator("#recipe-page .made-dates-list li")
+    expect(items).to_have_count(2)
+
+    page.locator("#recipe-page .remove-made-date").first.click()
+    page.locator("#recipe-page .confirm-remove-made-date").click()
+
+    expect(page.locator("#recipe-page .made-dates-status")).to_have_text(
+        Translator(locale).text("made_dates_save_failed")
+    )
+    expect(page.locator("#recipe-page .remove-made-date")).to_have_count(2)
+    expect(page.locator("#recipe-page .confirm-remove-made-date")).to_have_count(0)
+    expect(items).to_have_count(2)
+    assert [request[0] for request in _writes(requests)] == ["DELETE"]
+    assert sorted(list_made_dates(factory, "r1")) == ["2026-09-01", "2026-09-10"]
     engine.dispose()

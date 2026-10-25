@@ -6,6 +6,8 @@ import json
 import re
 import unittest
 
+import pytest
+
 from cookbook.i18n import Translator as get_translator
 from cookbook.models import Post, Recipe
 from cookbook.site_pages import (
@@ -407,3 +409,18 @@ def test_rating_badge_is_rendered_and_visible_in_grid() -> None:
     # Ratings are loaded separately, so recipe objects never carry one.
     base_recipes_line = next(line for line in document.splitlines() if "const baseRecipes =" in line)
     assert '"rating"' not in base_recipes_line
+
+
+@pytest.mark.parametrize("locale", ["en", "he"])
+def test_made_dates_section_offers_other_date_input_without_a_today_cap(locale: str) -> None:
+    """Other date accepts any past or future date in every locale, so no today cap is rendered."""
+    translator = get_translator(locale)
+    document = render_html([make_recipe()], "favicon.svg", locale=locale)
+
+    assert '<details class="recipe-disclosure made-date-other"' in document
+    assert 'class="made-date-input" max="9999-12-31"' in document
+    assert f'aria-label="{translator.html("made_date_input")}"' in document
+    assert 'class="add-made-date"' in document
+    script = next(part for part in document.split("<script>") if "renderMadeDates" in part)
+    assert "confirm-remove-made-date" in script
+    assert "max = localToday" not in document
